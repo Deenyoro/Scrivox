@@ -232,6 +232,7 @@ class ScrivoxApp(tk.Tk):
             summary_model=s.summary_model_var.get(),
             output_format=self.output_frame.format_var.get(),
             output_path=self.output_frame.output_path_var.get() or None,
+            subtitle_speakers=self.output_frame.subtitle_speakers_var.get(),
             hf_token=self.api_frame.get_hf_token(),
             openrouter_key=self.api_frame.get_openrouter_key(),
         )

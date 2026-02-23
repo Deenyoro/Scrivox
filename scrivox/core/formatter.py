@@ -1,6 +1,7 @@
 """Output formatting: timestamps and multi-format transcript output."""
 
 import json
+import textwrap
 
 
 def format_timestamp(seconds, fmt="srt"):
@@ -24,9 +25,71 @@ def format_timestamp_human(seconds):
     return f"{m}:{s:02d}"
 
 
+def _merge_subtitle_segments(segments, max_chars=84, max_duration=7.0, max_gap=1.5):
+    """Merge consecutive segments into subtitle-sized blocks.
+
+    Args:
+        max_chars: Max characters per subtitle block (two lines of ~42 chars)
+        max_duration: Max seconds a single subtitle should stay on screen
+        max_gap: Max gap in seconds to allow merging across
+    """
+    if not segments:
+        return []
+
+    merged = []
+    current = {
+        "start": segments[0]["start"],
+        "end": segments[0]["end"],
+        "text": segments[0]["text"].strip(),
+        "speaker": segments[0].get("speaker", ""),
+    }
+
+    for seg in segments[1:]:
+        same_speaker = seg.get("speaker", "") == current["speaker"]
+        gap = seg["start"] - current["end"]
+        combined_text = current["text"] + " " + seg["text"].strip()
+        combined_duration = seg["end"] - current["start"]
+
+        if (same_speaker and gap <= max_gap
+                and len(combined_text) <= max_chars
+                and combined_duration <= max_duration):
+            current["text"] = combined_text
+            current["end"] = seg["end"]
+        else:
+            merged.append(current)
+            current = {
+                "start": seg["start"],
+                "end": seg["end"],
+                "text": seg["text"].strip(),
+                "speaker": seg.get("speaker", ""),
+            }
+
+    merged.append(current)
+    return merged
+
+
+def _wrap_subtitle_text(text, max_line=42):
+    """Wrap subtitle text to max two lines for readability."""
+    if len(text) <= max_line:
+        return text
+    wrapped = textwrap.fill(text, width=max_line, max_lines=2,
+                             break_long_words=False, break_on_hyphens=False)
+    return wrapped
+
+
 def format_output(segments, fmt="txt", diarized=False, visual_context=None,
-                  summary=None, metadata=None):
-    """Format transcript segments into the requested output format."""
+                  summary=None, metadata=None, subtitle_speakers=False):
+    """Format transcript segments into the requested output format.
+
+    Args:
+        segments: List of transcript segment dicts
+        fmt: Output format (txt, md, srt, vtt, json, tsv)
+        diarized: Whether segments have speaker labels
+        visual_context: Optional list of visual context entries
+        summary: Optional meeting summary string
+        metadata: Optional metadata dict
+        subtitle_speakers: Show speaker labels in SRT/VTT subtitles (default: off)
+    """
     lines = []
 
     if fmt == "txt":
@@ -116,24 +179,31 @@ def format_output(segments, fmt="txt", diarized=False, visual_context=None,
         return "\n".join(lines).strip()
 
     elif fmt == "srt":
-        for i, seg in enumerate(segments, 1):
+        # Merge segments into proper subtitle blocks
+        merged = _merge_subtitle_segments(segments)
+        for i, seg in enumerate(merged, 1):
             start_ts = format_timestamp(seg["start"], "srt")
             end_ts = format_timestamp(seg["end"], "srt")
-            speaker_prefix = f"[{seg['speaker']}] " if diarized and seg.get("speaker") else ""
+            text = _wrap_subtitle_text(seg["text"])
+            if subtitle_speakers and diarized and seg.get("speaker"):
+                text = f"[{seg['speaker']}]\n{text}"
             lines.append(f"{i}")
             lines.append(f"{start_ts} --> {end_ts}")
-            lines.append(f"{speaker_prefix}{seg['text']}")
+            lines.append(text)
             lines.append("")
         return "\n".join(lines)
 
     elif fmt == "vtt":
         lines.append("WEBVTT\n")
-        for seg in segments:
+        merged = _merge_subtitle_segments(segments)
+        for seg in merged:
             start_ts = format_timestamp(seg["start"], "vtt")
             end_ts = format_timestamp(seg["end"], "vtt")
-            speaker_prefix = f"<v {seg['speaker']}>" if diarized and seg.get("speaker") else ""
+            text = _wrap_subtitle_text(seg["text"])
+            if subtitle_speakers and diarized and seg.get("speaker"):
+                text = f"<v {seg['speaker']}>{text}"
             lines.append(f"{start_ts} --> {end_ts}")
-            lines.append(f"{speaker_prefix}{seg['text']}")
+            lines.append(text)
             lines.append("")
         return "\n".join(lines)
 

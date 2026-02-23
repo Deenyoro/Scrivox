@@ -17,6 +17,7 @@ class OutputFrame(ttk.LabelFrame):
 
         self.format_var = tk.StringVar(value="txt")
         self.output_path_var = tk.StringVar()
+        self.subtitle_speakers_var = tk.BooleanVar(value=False)
 
         self._build()
 
@@ -34,6 +35,10 @@ class OutputFrame(ttk.LabelFrame):
         ttk.Entry(row, textvariable=self.output_path_var).pack(
             side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 4))
         ttk.Button(row, text="...", command=self._browse_output, width=3).pack(side=tk.RIGHT)
+
+        ttk.Checkbutton(self, text="Speaker labels in subtitles (SRT/VTT)",
+                        variable=self.subtitle_speakers_var).pack(
+            padx=8, pady=(0, 4), anchor=tk.W)
 
         ttk.Label(self, text="Leave path blank for auto-naming or console output",
                   style="Dim.TLabel").pack(padx=8, pady=(0, 6), anchor=tk.W)

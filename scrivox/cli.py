@@ -75,6 +75,8 @@ def build_parser():
     output_group.add_argument("--format", "-f", default="txt",
                               choices=OUTPUT_FORMATS,
                               help="Output format (default: txt)")
+    output_group.add_argument("--subtitle-speakers", action="store_true",
+                              help="Include speaker labels in SRT/VTT subtitles (off by default)")
 
     # Cache / credential options
     parser.add_argument("--clear-cache", action="store_true",
@@ -144,6 +146,7 @@ def run_cli(argv=None):
         summary_model=args.summary_model,
         output_format=args.format,
         output_path=args.output,
+        subtitle_speakers=args.subtitle_speakers,
         hf_token=args.hf_token,
         openrouter_key=args.openrouter_key,
         clear_cache=args.clear_cache,

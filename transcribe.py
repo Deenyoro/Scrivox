@@ -846,10 +846,9 @@ def format_output(segments, fmt="txt", diarized=False, visual_context=None, summ
         for i, seg in enumerate(segments, 1):
             start_ts = format_timestamp(seg["start"], "srt")
             end_ts = format_timestamp(seg["end"], "srt")
-            speaker_prefix = f"[{seg['speaker']}] " if diarized and seg.get("speaker") else ""
             lines.append(f"{i}")
             lines.append(f"{start_ts} --> {end_ts}")
-            lines.append(f"{speaker_prefix}{seg['text']}")
+            lines.append(seg["text"])
             lines.append("")
         return "\n".join(lines)
 

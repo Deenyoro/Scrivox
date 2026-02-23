@@ -51,6 +51,7 @@ class PipelineConfig:
     # Output
     output_format: str = "txt"
     output_path: Optional[str] = None
+    subtitle_speakers: bool = False
 
     # Credentials
     hf_token: Optional[str] = None
@@ -364,6 +365,7 @@ class TranscriptionPipeline:
             visual_context=visual_context,
             summary=summary,
             metadata=metadata,
+            subtitle_speakers=cfg.subtitle_speakers,
         )
 
         total_elapsed = time.time() - total_t0
