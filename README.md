@@ -134,6 +134,8 @@ Options:
   --vision-interval SEC   Seconds between keyframes (default: 60)
   --vision-model MODEL    Vision model (default: google/gemini-2.5-flash)
 
+  --subtitle-speakers     Show speaker labels in SRT/VTT (off by default)
+
   --summarize             Generate meeting summary
   --summary-model MODEL   Summary model (default: google/gemini-2.5-flash)
 

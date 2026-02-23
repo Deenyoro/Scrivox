@@ -27,13 +27,6 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install CUDA Toolkit 12.1
-        uses: Jimver/cuda-toolkit@v0.2.16
-        id: cuda-toolkit
-        with:
-          cuda: '12.1.0'
-          method: 'network'
-
       - name: Install PyTorch (CUDA 12.1)
         run: pip install torch --index-url https://download.pytorch.org/whl/cu121
 
@@ -90,11 +83,6 @@ jobs:
             1. Download and extract the `.7z` archive
             2. Copy `.env.example` to `.env` and add your API keys
             3. Double-click `Scrivox.exe` for GUI, or use from command line
-
-            ### Custom Models
-            - **Whisper models** are downloaded automatically on first use and cached in the `models/` folder
-            - **Diarization models** (Full variant) are pre-bundled in `models/`
-            - You can replace any model files in `models/` with your own
 
             ### Requirements
             - Windows 10/11 (64-bit)
