@@ -141,6 +141,15 @@ def assign_speakers(transcript_segments, speaker_segments, speaker_names=None):
                 best_overlap = overlap
                 best_speaker = spk["speaker"]
 
+        # If no overlap found, fall back to nearest speaker in time
+        if best_speaker == "UNKNOWN" and speaker_segments:
+            min_gap = float('inf')
+            for spk in speaker_segments:
+                gap = max(0, max(seg["start"], spk["start"]) - min(seg["end"], spk["end"]))
+                if gap < min_gap:
+                    min_gap = gap
+                    best_speaker = spk["speaker"]
+
         seg["speaker"] = best_speaker
 
     speaker_map = {}

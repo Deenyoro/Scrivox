@@ -95,7 +95,7 @@ all_ok &= check("scrivox.core.pipeline", lambda: "ok" if __import__("scrivox.cor
 
 # ── GPU transcription test ──
 print("\n  -- Functional Tests --")
-print("  Testing faster-whisper GPU transcription...")
+print("  Testing GPU transcription...")
 try:
     from faster_whisper import WhisperModel
     import numpy as np

@@ -1,23 +1,16 @@
 """
-Whisper GPU Transcription with Speaker Diarization + Visual Context + Meeting Summary.
+Scrivox Transcription - Legacy standalone entry point.
+
+Use main.py instead for the full Scrivox experience (GUI + CLI).
+This file is kept for backward compatibility.
 
 Full pipeline:
   1. faster-whisper transcription on GPU (float16)
   2. pyannote speaker diarization on GPU
   3. ffmpeg keyframe extraction from video
   4. Vision LLM describes keyframes via OpenRouter
-  5. LLM-generated meeting summary with action items
+  5. Meeting summary with action items
   6. Combined output with speaker labels + visual context
-
-Usage:
-    python transcribe.py input.mp3
-    python transcribe.py input.mp4 --diarize
-    python transcribe.py input.mp4 --diarize --vision
-    python transcribe.py input.mp4 --diarize --vision --summarize
-    python transcribe.py input.mp4 --all                              (diarize + vision + summarize)
-    python transcribe.py input.mp4 --diarize --vision --format json -o out.json
-    python transcribe.py input.mp4 --diarize --speaker-names "Alice,Bob,Charlie"
-    python transcribe.py input.mp4 --all --format md -o meeting.md
 
 Requires .env file with:
     HF_TOKEN=...              (for diarization)
@@ -235,7 +228,7 @@ def _normalize_punctuation(text):
 
 
 def _capitalize_text(text):
-    """Capitalize sentence starts and the pronoun I for readability."""
+    """Capitalize sentence starts, the pronoun I, and common acronyms."""
     if not text:
         return text
     # Capitalize first character of segment
@@ -244,6 +237,9 @@ def _capitalize_text(text):
     text = re.sub(r'([.!?])\s+([a-z])', lambda m: m.group(1) + ' ' + m.group(2).upper(), text)
     # Capitalize the pronoun "i" (standalone and contractions like i'm, i'll, i've, i'd)
     text = re.sub(r"\bi\b", "I", text)
+    # Capitalize common acronyms that Whisper often lowercases
+    for acronym in ("ai", "hr", "api", "pto", "sso", "saas", "usa", "uk", "eu"):
+        text = re.sub(r'\b' + acronym + r'\b', acronym.upper(), text, flags=re.IGNORECASE)
     return text
 
 
@@ -901,7 +897,7 @@ def format_output(segments, fmt="txt", diarized=False, visual_context=None, summ
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Whisper GPU Transcription + Diarization + Vision + Meeting Summary",
+        description="Scrivox Transcription + Diarization + Vision + Meeting Summary",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""Examples:
   python transcribe.py meeting.mp3
@@ -1042,7 +1038,7 @@ def main():
 
     # ── Banner ──
     print("=" * 60)
-    print("  WHISPER GPU TRANSCRIPTION")
+    print("  SCRIVOX TRANSCRIPTION")
     if args.diarize:
         print("  + SPEAKER DIARIZATION")
     if args.vision:

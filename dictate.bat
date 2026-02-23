@@ -1,6 +1,6 @@
 @echo off
-title Whisper GPU Dictation
-echo Starting Whisper Dictation (GPU)...
+title Scrivox Dictation
+echo Starting Scrivox Dictation (GPU)...
 echo.
 python "%~dp0dictate.py" %*
 pause

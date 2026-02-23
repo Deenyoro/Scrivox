@@ -222,6 +222,13 @@ class TranscriptionPipeline:
                 cached_model = cache.get("model")
                 cached_language = cache.get("language")
                 cached_diarized = cache.get("diarized", False)
+                cached_diarize_params = cache.get("diarize_params", {})
+
+                current_diarize_params = {
+                    "num_speakers": cfg.num_speakers,
+                    "min_speakers": cfg.min_speakers,
+                    "max_speakers": cfg.max_speakers,
+                }
 
                 if cached_model and cached_model != cfg.model:
                     self.on_progress(f"  Cache used model '{cached_model}', now using '{cfg.model}' \u2014 re-transcribing.")
@@ -229,6 +236,8 @@ class TranscriptionPipeline:
                     self.on_progress(f"  Cache used language '{cached_language}', now using '{cfg.language}' \u2014 re-transcribing.")
                 elif cfg.diarize and not cached_diarized:
                     self.on_progress("  Cache was not diarized, but diarization requested \u2014 re-transcribing.")
+                elif cfg.diarize and cached_diarized and cached_diarize_params != current_diarize_params:
+                    self.on_progress("  Diarization parameters changed \u2014 re-transcribing.")
                 else:
                     self.on_progress(f"Loaded {len(segments)} segments from cache")
                     cache_hit = True
@@ -269,6 +278,11 @@ class TranscriptionPipeline:
                 "model": cfg.model,
                 "language": cfg.language,
                 "diarized": cfg.diarize,
+                "diarize_params": {
+                    "num_speakers": cfg.num_speakers,
+                    "min_speakers": cfg.min_speakers,
+                    "max_speakers": cfg.max_speakers,
+                },
             }
             try:
                 with open(cache_path, "w", encoding="utf-8") as f:
@@ -362,11 +376,15 @@ class TranscriptionPipeline:
 
         # Determine output path
         output_path = cfg.output_path
-        if not output_path and cfg.output_format != "txt":
+        if not output_path:
             base = os.path.splitext(cfg.input_path)[0]
-            ext_map = {"md": ".md", "srt": ".srt", "vtt": ".vtt", "json": ".json", "tsv": ".tsv"}
-            output_path = base + ext_map[cfg.output_format]
-            self.on_progress(f"Auto-saving to: {output_path}")
+            if cfg.output_format != "txt":
+                ext_map = {"md": ".md", "srt": ".srt", "vtt": ".vtt", "json": ".json", "tsv": ".tsv"}
+                output_path = base + ext_map[cfg.output_format]
+            elif cfg.diarize or cfg.vision or cfg.summarize:
+                output_path = base + "_transcript.txt"
+            if output_path:
+                self.on_progress(f"Auto-saving to: {output_path}")
 
         # Write output
         if output_path:

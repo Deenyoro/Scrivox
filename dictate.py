@@ -1,5 +1,5 @@
 """
-Whisper GPU Dictation - Real-time speech-to-text with keyboard typing output.
+Scrivox Dictation - Real-time speech-to-text with keyboard typing output.
 
 Uses faster-whisper on GPU for fast transcription.
 
@@ -96,7 +96,7 @@ def type_text(text):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Whisper GPU Dictation")
+    parser = argparse.ArgumentParser(description="Scrivox Dictation")
     parser.add_argument("--model", default="large-v3",
                         help="Model: tiny, base, small, medium, large-v3 (default: large-v3)")
     parser.add_argument("--language", default=None,
@@ -159,7 +159,7 @@ def main():
         sys.exit(1)
 
     print("=" * 60)
-    print("  WHISPER GPU DICTATION")
+    print("  SCRIVOX DICTATION")
     print("=" * 60)
     print(f"  Model:    {args.model}")
     print(f"  Language: {args.language or 'auto-detect'}")
