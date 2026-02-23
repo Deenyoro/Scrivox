@@ -84,8 +84,14 @@ def build_parser():
                         help="Force re-transcription, ignoring cached results")
     parser.add_argument("--hf-token", default=None,
                         help="HuggingFace token (overrides .env / cached login)")
+    parser.add_argument("--api-key", default=None,
+                        help="LLM API key for vision/summary (overrides .env)")
     parser.add_argument("--openrouter-key", default=None,
-                        help="OpenRouter API key (overrides .env)")
+                        help="Alias for --api-key (backward compat)")
+    parser.add_argument("--api-base", default=None,
+                        help="LLM API base URL (default: OpenRouter). "
+                             "Examples: https://api.openai.com/v1/chat/completions, "
+                             "http://localhost:11434/v1/chat/completions")
 
     return parser
 
@@ -130,6 +136,7 @@ def run_cli(argv=None):
         speaker_names = [name.strip() for name in args.speaker_names.split(",") if name.strip()]
 
     # Build config
+    api_key = args.api_key or args.openrouter_key
     config = PipelineConfig(
         input_path=args.input,
         model=args.model,
@@ -148,8 +155,9 @@ def run_cli(argv=None):
         output_format=args.format,
         output_path=args.output,
         subtitle_speakers=args.subtitle_speakers,
+        api_base=args.api_base,
         hf_token=args.hf_token,
-        openrouter_key=args.openrouter_key,
+        openrouter_key=api_key,
         clear_cache=args.clear_cache,
     )
 

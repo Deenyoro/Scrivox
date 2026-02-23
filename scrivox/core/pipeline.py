@@ -53,6 +53,9 @@ class PipelineConfig:
     output_path: Optional[str] = None
     subtitle_speakers: bool = False
 
+    # LLM API
+    api_base: Optional[str] = None
+
     # Credentials
     hf_token: Optional[str] = None
     openrouter_key: Optional[str] = None
@@ -163,7 +166,7 @@ class TranscriptionPipeline:
             raise PipelineError("Diarization requires HF_TOKEN in .env, config, or huggingface-cli login")
 
         if (cfg.vision or cfg.summarize) and not openrouter_key:
-            raise PipelineError("Vision/Summary requires OPENROUTER_API_KEY in .env or config")
+            raise PipelineError("Vision/Summary requires an LLM API key in .env or config")
 
         # Check video for vision
         is_video = has_video_stream(cfg.input_path)
@@ -323,7 +326,7 @@ class TranscriptionPipeline:
                     self._check_cancel()
                     visual_context = analyze_keyframes(
                         keyframes, openrouter_key, cfg.vision_model,
-                        cfg.vision_workers,
+                        cfg.vision_workers, api_base=cfg.api_base,
                         on_progress=self.on_progress,
                     )
 
@@ -338,6 +341,7 @@ class TranscriptionPipeline:
                 summary = generate_meeting_summary(
                     segments, openrouter_key, cfg.summary_model,
                     diarized=cfg.diarize, visual_context=visual_context,
+                    api_base=cfg.api_base,
                     on_progress=self.on_progress,
                 )
         finally:

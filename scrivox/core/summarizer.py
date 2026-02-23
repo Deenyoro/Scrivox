@@ -19,7 +19,7 @@ def _safe_parse_api_response(resp):
 
 
 def generate_meeting_summary(segments, api_key, summary_model, diarized=False,
-                             visual_context=None, on_progress=print):
+                             visual_context=None, api_base=None, on_progress=print):
     """Generate a meeting summary with key points, decisions, and action items."""
     on_progress(f"Generating meeting summary with {summary_model}...")
     t0 = time.time()
@@ -84,10 +84,13 @@ Be concise and factual. Only include information actually present in the transcr
         "Content-Type": "application/json",
     }
 
+    from .constants import LLM_PROVIDERS, DEFAULT_LLM_PROVIDER
+    url = api_base or LLM_PROVIDERS[DEFAULT_LLM_PROVIDER]
+
     for attempt in range(3):
         try:
             resp = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
+                url,
                 headers=headers, json=payload, timeout=120,
             )
             if resp.status_code == 200:

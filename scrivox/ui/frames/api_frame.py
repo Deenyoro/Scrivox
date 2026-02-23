@@ -1,15 +1,17 @@
-"""API key entry fields with show/hide toggle and test button."""
+"""API key entry fields with provider selection, show/hide toggle, and test button."""
 
 import os
 import tkinter as tk
 from tkinter import ttk
 import threading
 
+from ...core.constants import LLM_PROVIDERS, DEFAULT_LLM_PROVIDER
+from ...core.diarizer import _get_bundled_models_dir
 from ..theme import COLORS, FONTS
 
 
 class ApiFrame(ttk.LabelFrame):
-    """API key fields for HuggingFace and OpenRouter."""
+    """API key fields for HuggingFace and LLM providers."""
 
     def __init__(self, parent, config_manager=None, **kwargs):
         super().__init__(parent, text="API KEYS", **kwargs)
@@ -17,25 +19,47 @@ class ApiFrame(ttk.LabelFrame):
 
         self.hf_token_var = tk.StringVar()
         self.openrouter_key_var = tk.StringVar()
+        self.provider_var = tk.StringVar(value=DEFAULT_LLM_PROVIDER)
+        self.custom_base_var = tk.StringVar()
         self._show_keys = False
+        self._has_bundled = _get_bundled_models_dir() is not None
 
         self._build()
         self._load_from_config()
 
     def _build(self):
-        # HuggingFace Token
-        row = ttk.Frame(self)
-        row.pack(fill=tk.X, padx=8, pady=(8, 4))
-        ttk.Label(row, text="HF Token:").pack(side=tk.LEFT)
-        self._hf_entry = ttk.Entry(row, textvariable=self.hf_token_var, show="*")
-        self._hf_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 4))
+        # HuggingFace Token (hidden if bundled models exist)
+        if not self._has_bundled:
+            row = ttk.Frame(self)
+            row.pack(fill=tk.X, padx=8, pady=(8, 4))
+            ttk.Label(row, text="HF Token:").pack(side=tk.LEFT)
+            self._hf_entry = ttk.Entry(row, textvariable=self.hf_token_var, show="*")
+            self._hf_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 4))
+        else:
+            self._hf_entry = None
 
-        # OpenRouter Key
+        # LLM Provider
+        row = ttk.Frame(self)
+        row.pack(fill=tk.X, padx=8, pady=(8 if self._has_bundled else 0, 4))
+        ttk.Label(row, text="Provider:").pack(side=tk.LEFT)
+        providers = list(LLM_PROVIDERS.keys()) + ["Custom"]
+        provider_combo = ttk.Combobox(row, textvariable=self.provider_var,
+                                       values=providers, state="readonly", width=16)
+        provider_combo.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
+        provider_combo.bind("<<ComboboxSelected>>", self._on_provider_change)
+
+        # API Key
         row = ttk.Frame(self)
         row.pack(fill=tk.X, padx=8, pady=(0, 4))
-        ttk.Label(row, text="OR Key:   ").pack(side=tk.LEFT)
+        ttk.Label(row, text="API Key:  ").pack(side=tk.LEFT)
         self._or_entry = ttk.Entry(row, textvariable=self.openrouter_key_var, show="*")
         self._or_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 4))
+
+        # Custom base URL (hidden by default)
+        self._custom_frame = ttk.Frame(self)
+        ttk.Label(self._custom_frame, text="Base URL:").pack(side=tk.LEFT)
+        ttk.Entry(self._custom_frame, textvariable=self.custom_base_var).pack(
+            side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 0))
 
         # Buttons row
         btn_row = ttk.Frame(self)
@@ -50,6 +74,13 @@ class ApiFrame(ttk.LabelFrame):
         self._status_label = ttk.Label(btn_row, text="", style="Dim.TLabel")
         self._status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
+    def _on_provider_change(self, event=None):
+        if self.provider_var.get() == "Custom":
+            self._custom_frame.pack(fill=tk.X, padx=8, pady=(0, 4),
+                                     before=self._show_btn.master)
+        else:
+            self._custom_frame.pack_forget()
+
     def _load_from_config(self):
         """Load keys from config, falling back to env vars."""
         hf = ""
@@ -63,10 +94,19 @@ class ApiFrame(ttk.LabelFrame):
         self.hf_token_var.set(hf)
         self.openrouter_key_var.set(or_key)
 
+        # Load provider setting
+        if self.config_manager:
+            provider = self.config_manager.get("api", "provider", DEFAULT_LLM_PROVIDER)
+            self.provider_var.set(provider)
+            custom_base = self.config_manager.get("api", "custom_base", "")
+            self.custom_base_var.set(custom_base)
+            self._on_provider_change()
+
     def _toggle_show(self):
         self._show_keys = not self._show_keys
         show_char = "" if self._show_keys else "*"
-        self._hf_entry.configure(show=show_char)
+        if self._hf_entry:
+            self._hf_entry.configure(show=show_char)
         self._or_entry.configure(show=show_char)
         self._show_btn.configure(text="Hide" if self._show_keys else "Show")
 
@@ -80,39 +120,43 @@ class ApiFrame(ttk.LabelFrame):
             hf = self.hf_token_var.get().strip()
             or_key = self.openrouter_key_var.get().strip()
 
-            if hf:
-                try:
-                    import requests
-                    resp = requests.get(
-                        "https://huggingface.co/api/whoami-v2",
-                        headers={"Authorization": f"Bearer {hf}"},
-                        timeout=10,
-                    )
-                    if resp.status_code == 200:
-                        results.append("HF: OK")
-                    else:
-                        results.append(f"HF: {resp.status_code}")
-                except Exception as e:
-                    results.append(f"HF: {type(e).__name__}")
-            else:
-                results.append("HF: not set")
+            if not self._has_bundled:
+                if hf:
+                    try:
+                        import requests
+                        resp = requests.get(
+                            "https://huggingface.co/api/whoami-v2",
+                            headers={"Authorization": f"Bearer {hf}"},
+                            timeout=10,
+                        )
+                        if resp.status_code == 200:
+                            results.append("HF: OK")
+                        else:
+                            results.append(f"HF: {resp.status_code}")
+                    except Exception as e:
+                        results.append(f"HF: {type(e).__name__}")
+                else:
+                    results.append("HF: not set")
 
             if or_key:
                 try:
                     import requests
+                    base_url = self.get_api_base()
+                    # Test by sending a minimal request
+                    test_url = base_url.replace("/chat/completions", "/models")
                     resp = requests.get(
-                        "https://openrouter.ai/api/v1/models",
+                        test_url,
                         headers={"Authorization": f"Bearer {or_key}"},
                         timeout=10,
                     )
                     if resp.status_code == 200:
-                        results.append("OR: OK")
+                        results.append("API: OK")
                     else:
-                        results.append(f"OR: {resp.status_code}")
+                        results.append(f"API: {resp.status_code}")
                 except Exception as e:
-                    results.append(f"OR: {type(e).__name__}")
+                    results.append(f"API: {type(e).__name__}")
             else:
-                results.append("OR: not set")
+                results.append("API: not set")
 
             status_text = " | ".join(results)
             all_ok = all("OK" in r for r in results if "not set" not in r)
@@ -130,15 +174,24 @@ class ApiFrame(ttk.LabelFrame):
         self._test_btn.configure(state=tk.NORMAL)
 
     def save_to_config(self):
-        """Save current keys to config manager."""
+        """Save current keys and provider to config manager."""
         if self.config_manager:
             self.config_manager.set_credentials(
                 hf_token=self.hf_token_var.get().strip(),
                 openrouter_key=self.openrouter_key_var.get().strip(),
             )
+            self.config_manager.set("api", "provider", self.provider_var.get())
+            self.config_manager.set("api", "custom_base", self.custom_base_var.get().strip())
 
     def get_hf_token(self):
         return self.hf_token_var.get().strip()
 
     def get_openrouter_key(self):
         return self.openrouter_key_var.get().strip()
+
+    def get_api_base(self):
+        """Get the resolved API base URL for the selected provider."""
+        provider = self.provider_var.get()
+        if provider == "Custom":
+            return self.custom_base_var.get().strip()
+        return LLM_PROVIDERS.get(provider, LLM_PROVIDERS[DEFAULT_LLM_PROVIDER])

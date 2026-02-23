@@ -199,14 +199,14 @@ class ScrivoxApp(tk.Tk):
             return False
 
         settings = self.settings_frame
-        if settings.diarize_var.get() and not self.api_frame.get_hf_token():
+        if settings.diarize_var.get() and not self.api_frame.get_hf_token() and not self.api_frame._has_bundled:
             messagebox.showerror("Error",
                                  "Diarization requires a HuggingFace token.\n"
                                  "Enter it in the API Keys section.")
             return False
         if (settings.vision_var.get() or settings.summarize_var.get()) and not self.api_frame.get_openrouter_key():
             messagebox.showerror("Error",
-                                 "Vision/Summary requires an OpenRouter API key.\n"
+                                 "Vision/Summary requires an LLM API key.\n"
                                  "Enter it in the API Keys section.")
             return False
 
@@ -233,6 +233,7 @@ class ScrivoxApp(tk.Tk):
             output_format=self.output_frame.format_var.get(),
             output_path=self.output_frame.output_path_var.get() or None,
             subtitle_speakers=self.output_frame.subtitle_speakers_var.get(),
+            api_base=self.api_frame.get_api_base(),
             hf_token=self.api_frame.get_hf_token(),
             openrouter_key=self.api_frame.get_openrouter_key(),
         )

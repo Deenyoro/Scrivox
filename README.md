@@ -4,14 +4,17 @@ GPU-accelerated transcription suite with speaker diarization, SRT subtitle gener
 
 ---
 
+![Scrivox GUI](assets/screenshot.png)
+
 ## Features
 
 - **Transcription** — faster-whisper on CUDA with float16 precision
 - **Speaker Diarization** — identify who said what via pyannote
 - **SRT/VTT Subtitles** — subtitle files with optional speaker labels
-- **Multi-Language** — auto-detect or specify any language code
+- **Multi-Language** — auto-detect or specify primary language; per-segment language detection for mixed content (Korean+English, etc.)
 - **Vision Analysis** — extract video keyframes and describe them with vision LLMs
 - **Meeting Summary** — structured summaries with action items and key points
+- **Multiple LLM Providers** — OpenRouter, OpenAI, Ollama, or any OpenAI-compatible endpoint
 - **6 Output Formats** — txt, md, srt, vtt, json, tsv
 - **GUI + CLI** — Tkinter desktop app or full command-line interface
 - **Portable Config** — JSON config stored next to the executable
@@ -41,8 +44,14 @@ python main.py meeting.mp4 --all --format md -o minutes.md
 # Custom speaker names
 python main.py meeting.mp4 --diarize --speaker-names "Alice,Bob,Charlie"
 
-# Different language
-python main.py audio.wav --language fr
+# Korean drama with mixed language detection
+python main.py kdrama.mp4 --language ko --format srt
+
+# Use OpenAI instead of OpenRouter
+python main.py meeting.mp3 --summarize --api-base https://api.openai.com/v1/chat/completions --api-key sk-...
+
+# Use local Ollama
+python main.py meeting.mp3 --summarize --api-base http://localhost:11434/v1/chat/completions
 
 # All features with JSON output
 python main.py video.mp4 --all -f json -o report.json
@@ -106,10 +115,26 @@ Add to `.env` file or enter in the GUI:
 
 | Key | Required For | Get One |
 |-----|-------------|---------|
-| `HF_TOKEN` | Speaker diarization (Lite variant) | [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
-| `OPENROUTER_API_KEY` | Vision analysis, meeting summaries | [openrouter.ai/keys](https://openrouter.ai/keys) |
+| `HF_TOKEN` | Speaker diarization (Lite variant only) | [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
+| `OPENROUTER_API_KEY` | Vision analysis, meeting summaries (if using OpenRouter) | [openrouter.ai/keys](https://openrouter.ai/keys) |
 
-For diarization, you must also accept the model license at [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1).
+> **Note:** The Full variant has diarization models bundled — no HuggingFace token needed.
+> Vision and summary features work with any OpenAI-compatible API provider.
+
+For diarization with the Lite variant, you must also accept the model license at [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1).
+
+## LLM Providers
+
+Scrivox supports any OpenAI-compatible API for vision and summary features:
+
+| Provider | Setup |
+|----------|-------|
+| **OpenRouter** (default) | Set `OPENROUTER_API_KEY` in `.env` |
+| **OpenAI** | Use `--api-base https://api.openai.com/v1/chat/completions --api-key sk-...` |
+| **Ollama** (local) | Run Ollama locally, use `--api-base http://localhost:11434/v1/chat/completions` |
+| **Custom** | Any endpoint that accepts the OpenAI chat completions format |
+
+In the GUI, select your provider from the dropdown in the API Keys section.
 
 ## CLI Reference
 
@@ -118,7 +143,7 @@ python main.py <input> [options]
 
 Options:
   --model MODEL           Whisper model: tiny, base, small, medium, large-v3
-  --language LANG         Language code (en, fr, ja, etc.) or auto-detect
+  --language LANG         Primary language code (en, ko, ja, etc.) or auto-detect
   --format FORMAT         Output: txt, md, srt, vtt, json, tsv
   --output PATH, -o PATH  Output file path
 
@@ -136,6 +161,10 @@ Options:
 
   --summarize             Generate meeting summary
   --summary-model MODEL   Summary model (default: google/gemini-2.5-flash)
+
+  --api-base URL          LLM API endpoint (default: OpenRouter)
+  --api-key KEY           LLM API key for vision/summary
+  --hf-token TOKEN        HuggingFace token (Lite variant diarization)
 
   --all                   Enable diarize + vision + summarize
   --clear-cache           Force re-transcription
@@ -167,7 +196,7 @@ scrivox/
   gui.py                   GUI entry point
   config.py                JSON config manager
   core/
-    constants.py           Models, extensions, defaults
+    constants.py           Models, extensions, defaults, LLM providers
     torch_compat.py        PyTorch 2.6+ compatibility
     media.py               ffmpeg utilities
     transcriber.py         Whisper transcription + post-processing
@@ -183,7 +212,7 @@ scrivox/
     frames/
       input_frame.py       File selection + media info
       settings_frame.py    Model, language, feature toggles
-      api_frame.py         API key management
+      api_frame.py         Provider selection + API key management
       output_frame.py      Format + output path
       progress_frame.py    Progress bar + elapsed timer
       log_frame.py         Scrollable log display

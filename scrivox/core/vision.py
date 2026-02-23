@@ -59,7 +59,7 @@ def extract_keyframes(video_path, interval_secs=60, max_frames=30, on_progress=p
     return keyframes, tmpdir
 
 
-def describe_keyframe(image_path, timestamp, api_key, vision_model, max_retries=3, on_progress=print):
+def describe_keyframe(image_path, timestamp, api_key, vision_model, api_base=None, max_retries=3, on_progress=print):
     """Send a keyframe to vision LLM and get a description, with retries."""
     with open(image_path, "rb") as f:
         img_b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -97,10 +97,13 @@ def describe_keyframe(image_path, timestamp, api_key, vision_model, max_retries=
         "Content-Type": "application/json",
     }
 
+    from .constants import LLM_PROVIDERS, DEFAULT_LLM_PROVIDER
+    url = api_base or LLM_PROVIDERS[DEFAULT_LLM_PROVIDER]
+
     for attempt in range(max_retries):
         try:
             resp = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
+                url,
                 headers=headers, json=payload, timeout=60,
             )
             if resp.status_code == 200:
@@ -126,7 +129,7 @@ def describe_keyframe(image_path, timestamp, api_key, vision_model, max_retries=
     return "[Vision error: max retries exceeded]"
 
 
-def analyze_keyframes(keyframes, api_key, vision_model, max_workers=4, on_progress=print):
+def analyze_keyframes(keyframes, api_key, vision_model, max_workers=4, api_base=None, on_progress=print):
     """Describe all keyframes using vision LLM with concurrent requests."""
     on_progress(f"Analyzing {len(keyframes)} keyframes with vision LLM ({vision_model})...")
     t0 = time.time()
@@ -136,7 +139,7 @@ def analyze_keyframes(keyframes, api_key, vision_model, max_workers=4, on_progre
     def process_frame(idx, kf):
         ts_str = format_timestamp_human(kf["timestamp"])
         on_progress(f"  Frame {idx+1}/{len(keyframes)} @ {ts_str}...")
-        desc = describe_keyframe(kf["path"], kf["timestamp"], api_key, vision_model, on_progress=on_progress)
+        desc = describe_keyframe(kf["path"], kf["timestamp"], api_key, vision_model, api_base=api_base, on_progress=on_progress)
         return idx, {"timestamp": kf["timestamp"], "description": desc}
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
