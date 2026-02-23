@@ -214,6 +214,7 @@ class TranscriptionPipeline:
 
         cache_hit = False
         segments = []
+        detected_lang = cfg.language
         if os.path.exists(cache_path) and not cfg.clear_cache:
             self.on_progress("Loading cached transcription + diarization...")
             try:
@@ -241,6 +242,7 @@ class TranscriptionPipeline:
                     self.on_progress("  Diarization parameters changed \u2014 re-transcribing.")
                 else:
                     self.on_progress(f"Loaded {len(segments)} segments from cache")
+                    detected_lang = cache.get("detected_language", cfg.language)
                     cache_hit = True
             except (json.JSONDecodeError, KeyError) as e:
                 self.on_progress(f"Warning: Cache file corrupt ({e}), re-transcribing.")
@@ -250,9 +252,10 @@ class TranscriptionPipeline:
                 cfg.input_path, cfg.model, cfg.language,
                 on_progress=self.on_progress,
             )
+            detected_lang = cfg.language or info.language
 
             before_count = len(segments)
-            segments = clean_transcription(segments)
+            segments = clean_transcription(segments, language=detected_lang)
             removed = before_count - len(segments)
             if removed > 0:
                 self.on_progress(f"Post-processing: removed {removed} hallucinated/non-speech segments")
@@ -278,6 +281,7 @@ class TranscriptionPipeline:
                 "segments": segments,
                 "model": cfg.model,
                 "language": cfg.language,
+                "detected_language": detected_lang,
                 "diarized": cfg.diarize,
                 "diarize_params": {
                     "num_speakers": cfg.num_speakers,
@@ -351,6 +355,7 @@ class TranscriptionPipeline:
             "input_file": os.path.basename(cfg.input_path),
             "model": cfg.model,
             "language": cfg.language or "auto-detect",
+            "detected_language": detected_lang,
             "diarized": cfg.diarize,
             "vision": cfg.vision,
             "summarized": cfg.summarize,

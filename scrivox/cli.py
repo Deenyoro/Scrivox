@@ -33,7 +33,8 @@ def build_parser():
     parser.add_argument("--model", default="large-v3",
                         help="Whisper model: tiny, base, small, medium, large-v3 (default: large-v3)")
     parser.add_argument("--language", default=None,
-                        help="Language code e.g. 'en', 'fr', 'ja' (default: auto-detect)")
+                        help="Primary language code e.g. 'ko', 'ja', 'en' (default: auto-detect). "
+                             "Sets the main language; other languages in mixed content are still detected.")
     parser.add_argument("--all", action="store_true",
                         help="Enable all features: diarize + vision + summarize")
 

@@ -54,7 +54,7 @@ class SettingsFrame(ttk.Frame):
         lang_entry = ttk.Entry(row2, textvariable=self.language_var, width=16)
         lang_entry.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
         # Tooltip-style hint
-        ttk.Label(model_frame, text="Leave blank for auto-detect (e.g. en, fr, ja)",
+        ttk.Label(model_frame, text="Primary language, blank for auto-detect (e.g. ko, ja, en)",
                   style="Dim.TLabel").pack(padx=8, pady=(0, 6), anchor=tk.W)
 
         # ── FEATURES ──

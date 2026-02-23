@@ -42,6 +42,7 @@ def _merge_subtitle_segments(segments, max_chars=84, max_duration=7.0, max_gap=1
         "end": segments[0]["end"],
         "text": segments[0]["text"].strip(),
         "speaker": segments[0].get("speaker", ""),
+        "language": segments[0].get("language", ""),
     }
 
     for seg in segments[1:]:
@@ -62,6 +63,7 @@ def _merge_subtitle_segments(segments, max_chars=84, max_duration=7.0, max_gap=1
                 "end": seg["end"],
                 "text": seg["text"].strip(),
                 "speaker": seg.get("speaker", ""),
+                "language": seg.get("language", ""),
             }
 
     merged.append(current)
@@ -195,11 +197,15 @@ def format_output(segments, fmt="txt", diarized=False, visual_context=None,
 
     elif fmt == "vtt":
         lines.append("WEBVTT\n")
+        primary_lang = (metadata or {}).get("detected_language", "")
         merged = _merge_subtitle_segments(segments)
         for seg in merged:
             start_ts = format_timestamp(seg["start"], "vtt")
             end_ts = format_timestamp(seg["end"], "vtt")
             text = _wrap_subtitle_text(seg["text"])
+            seg_lang = seg.get("language", "")
+            if seg_lang and seg_lang != primary_lang:
+                text = f"<lang {seg_lang}>{text}"
             if subtitle_speakers and diarized and seg.get("speaker"):
                 text = f"<v {seg['speaker']}>{text}"
             lines.append(f"{start_ts} --> {end_ts}")
@@ -222,13 +228,13 @@ def format_output(segments, fmt="txt", diarized=False, visual_context=None,
         header = "start\tend"
         if diarized:
             header += "\tspeaker"
-        header += "\ttext"
+        header += "\tlanguage\ttext"
         lines.append(header)
         for seg in segments:
             row = f"{seg['start']:.3f}\t{seg['end']:.3f}"
             if diarized:
                 row += f"\t{seg.get('speaker', '')}"
-            row += f"\t{seg['text']}"
+            row += f"\t{seg.get('language', '')}\t{seg['text']}"
             lines.append(row)
         return "\n".join(lines)
 

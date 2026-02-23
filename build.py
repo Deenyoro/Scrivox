@@ -30,6 +30,9 @@ def download_diarization_models(models_dir):
 
     Requires HF_TOKEN environment variable to be set.
     The token is only used for downloading — it is NOT stored in the output.
+
+    Uses huggingface_hub.snapshot_download instead of loading models into memory,
+    so no torch/GPU is needed — just file downloads.
     """
     hf_token = os.environ.get("HF_TOKEN")
     if not hf_token:
@@ -43,37 +46,25 @@ def download_diarization_models(models_dir):
     print("Downloading diarization models (this may take a few minutes)...")
     print(f"  Cache directory: {models_dir}")
 
-    # Use huggingface_hub to download the models into our custom cache
     os.environ["HF_HOME"] = models_dir
     os.environ["HF_HUB_CACHE"] = hub_dir
 
+    model_repos = [
+        "pyannote/speaker-diarization-3.1",
+        "pyannote/segmentation-3.0",
+        "speechbrain/spkrec-ecapa-voxceleb",
+    ]
+
     try:
-        import warnings
-        warnings.filterwarnings("ignore")
-        import contextlib
-        import torch
+        from huggingface_hub import snapshot_download
 
-        _orig = torch.load
-
-        @contextlib.contextmanager
-        def _unsafe():
-            def p(*a, **kw):
-                kw["weights_only"] = False
-                return _orig(*a, **kw)
-            torch.load = p
-            try:
-                yield
-            finally:
-                torch.load = _orig
-
-        from pyannote.audio import Pipeline
-        with _unsafe():
-            pipeline = Pipeline.from_pretrained(
-                "pyannote/speaker-diarization-3.1",
-                use_auth_token=hf_token,
+        for repo in model_repos:
+            print(f"  Downloading {repo}...")
+            snapshot_download(
+                repo,
+                token=hf_token,
+                cache_dir=hub_dir,
             )
-        del pipeline
-        torch.cuda.empty_cache() if torch.cuda.is_available() else None
 
         size = get_size_mb(models_dir)
         print(f"  Models downloaded successfully ({size:.0f} MB)")
@@ -159,10 +150,14 @@ def main():
     build_lite = args.lite or (not args.full and not args.lite)
 
     # ── Full build (with models) ──
+    full_explicitly_requested = args.full
     if build_full:
         # Download models if not already present
         if not os.path.isdir(models_dir):
             if not download_diarization_models(models_dir):
+                if full_explicitly_requested:
+                    print("Full build failed: model download failed.", file=sys.stderr)
+                    sys.exit(1)
                 print("Skipping Full build due to model download failure.", file=sys.stderr)
                 build_full = False
 

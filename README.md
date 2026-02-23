@@ -2,8 +2,6 @@
 
 GPU-accelerated transcription suite with speaker diarization, SRT subtitle generation, visual context analysis, and meeting summarization.
 
-Built by **Deenyoro** at **KawaConnect LLC**.
-
 ---
 
 ## Features

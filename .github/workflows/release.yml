@@ -51,7 +51,13 @@ jobs:
 
       - name: Archive Full variant
         shell: bash
-        run: 7z a "Scrivox-Full-${{ steps.tag.outputs.TAG }}-win64.7z" ./dist/Scrivox/*
+        run: |
+          if [ -d "./dist/Scrivox" ]; then
+            7z a "Scrivox-Full-${{ steps.tag.outputs.TAG }}-win64.7z" ./dist/Scrivox/*
+          else
+            echo "Full build directory not found, skipping archive"
+            exit 1
+          fi
 
       # ── Lite build (no bundled models) ──
       - name: Build Lite variant
@@ -59,7 +65,13 @@ jobs:
 
       - name: Archive Lite variant
         shell: bash
-        run: 7z a "Scrivox-Lite-${{ steps.tag.outputs.TAG }}-win64.7z" ./dist/Scrivox-Lite/*
+        run: |
+          if [ -d "./dist/Scrivox-Lite" ]; then
+            7z a "Scrivox-Lite-${{ steps.tag.outputs.TAG }}-win64.7z" ./dist/Scrivox-Lite/*
+          else
+            echo "Lite build directory not found, skipping archive"
+            exit 1
+          fi
 
       # ── Release ──
       - name: Create GitHub Release
