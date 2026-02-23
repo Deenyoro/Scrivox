@@ -1,0 +1,33 @@
+# Environment & secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Whisper cache files
+*.whisper_cache.json
+
+# Temp files
+whisper_frames_*/
+*.tmp
+
+# Config (user-specific)
+scrivox_config.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Downloaded models (bundled during build, not committed)
+models/
+
+# PyInstaller
+*.manifest
+*.spec.bak
