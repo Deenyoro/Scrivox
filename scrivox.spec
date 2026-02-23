@@ -15,12 +15,18 @@ from PyInstaller.utils.hooks import collect_all, copy_metadata
 block_cipher = None
 dist_name = os.environ.get('SCRIVOX_DIST_NAME', 'Scrivox')
 
-# Collect large packages
+# Collect large packages — every package that is imported at runtime
+# must be collected here so PyInstaller bundles all its files.
 torch_datas, torch_binaries, torch_hiddenimports = collect_all('torch')
 ct2_datas, ct2_binaries, ct2_hiddenimports = collect_all('ctranslate2')
 fw_datas, fw_binaries, fw_hiddenimports = collect_all('faster_whisper')
 pa_datas, pa_binaries, pa_hiddenimports = collect_all('pyannote.audio')
 sb_datas, sb_binaries, sb_hiddenimports = collect_all('speechbrain')
+ta_datas, ta_binaries, ta_hiddenimports = collect_all('torchaudio')
+pc_datas, pc_binaries, pc_hiddenimports = collect_all('pyannote.core')
+pd_datas, pd_binaries, pd_hiddenimports = collect_all('pyannote.database')
+pp_datas, pp_binaries, pp_hiddenimports = collect_all('pyannote.pipeline')
+tm_datas, tm_binaries, tm_hiddenimports = collect_all('torchmetrics')
 
 # Metadata needed for version detection
 metadata_packages = [
@@ -28,6 +34,7 @@ metadata_packages = [
     'safetensors', 'tqdm', 'packaging', 'filelock', 'numpy',
     'requests', 'certifi', 'charset_normalizer', 'urllib3', 'idna',
     'faster_whisper', 'ctranslate2', 'pyannote.audio', 'speechbrain',
+    'torchaudio',
 ]
 
 extra_datas = []
@@ -46,20 +53,29 @@ icon_file = 'assets/scrivox.ico' if os.path.isfile('assets/scrivox.ico') else No
 a = Analysis(
     ['main.py'],
     pathex=[],
-    binaries=torch_binaries + ct2_binaries + fw_binaries + pa_binaries + sb_binaries,
+    binaries=(
+        torch_binaries + ct2_binaries + fw_binaries + pa_binaries + sb_binaries
+        + ta_binaries + pc_binaries + pd_binaries + pp_binaries + tm_binaries
+    ),
     datas=(
         torch_datas + ct2_datas + fw_datas + pa_datas + sb_datas
+        + ta_datas + pc_datas + pd_datas + pp_datas + tm_datas
         + extra_datas
     ),
     hiddenimports=(
         torch_hiddenimports + ct2_hiddenimports + fw_hiddenimports
         + pa_hiddenimports + sb_hiddenimports
+        + ta_hiddenimports + pc_hiddenimports + pd_hiddenimports
+        + pp_hiddenimports + tm_hiddenimports
         + [
             'sounddevice', 'pynput', 'pynput.keyboard', 'pynput.keyboard._win32',
             'keyboard', 'pyperclip', 'dotenv',
             'sklearn', 'sklearn.cluster', 'sklearn.utils', 'sklearn.utils._cython_blas',
             'sklearn.neighbors', 'sklearn.neighbors._typedefs',
-            'scipy', 'scipy.signal',
+            'sklearn.metrics', 'sklearn.metrics.pairwise', 'sklearn.preprocessing',
+            'scipy', 'scipy.signal', 'scipy.spatial', 'scipy.sparse',
+            'scipy.linalg', 'scipy.special', 'scipy.stats',
+            'scipy.fft', 'scipy.interpolate',
             'asteroid_filterbanks',
             'pyannote.audio.pipelines',
             'pyannote.audio.pipelines.speaker_diarization',
@@ -69,10 +85,7 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        'matplotlib', 'matplotlib.backends',
-        'torch.distributed', 'torch.testing',
-        'torchaudio', 'torchvision',
-        'IPython', 'pytest', 'unittest',
+        'IPython', 'pytest',
         'tkinter.test',
     ],
     win_no_prefer_redirects=False,
