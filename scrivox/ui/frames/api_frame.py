@@ -28,19 +28,23 @@ class ApiFrame(ttk.LabelFrame):
         self._load_from_config()
 
     def _build(self):
-        # HuggingFace Token (hidden if bundled models exist)
-        if not self._has_bundled:
-            row = ttk.Frame(self)
-            row.pack(fill=tk.X, padx=8, pady=(8, 4))
-            ttk.Label(row, text="HF Token:").pack(side=tk.LEFT)
-            self._hf_entry = ttk.Entry(row, textvariable=self.hf_token_var, show="*")
-            self._hf_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 4))
+        # HuggingFace Token — always shown
+        row = ttk.Frame(self)
+        row.pack(fill=tk.X, padx=8, pady=(8, 4))
+        ttk.Label(row, text="HF Token:").pack(side=tk.LEFT)
+        self._hf_entry = ttk.Entry(row, textvariable=self.hf_token_var, show="*")
+        self._hf_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 4))
+
+        if self._has_bundled:
+            ttk.Label(self, text="Optional \u2014 bundled models found",
+                      style="Dim.TLabel").pack(padx=8, pady=(0, 2), anchor=tk.W)
         else:
-            self._hf_entry = None
+            ttk.Label(self, text="Required to download diarization models",
+                      style="Dim.TLabel").pack(padx=8, pady=(0, 2), anchor=tk.W)
 
         # LLM Provider
         row = ttk.Frame(self)
-        row.pack(fill=tk.X, padx=8, pady=(8 if self._has_bundled else 0, 4))
+        row.pack(fill=tk.X, padx=8, pady=(0, 4))
         ttk.Label(row, text="Provider:").pack(side=tk.LEFT)
         providers = list(LLM_PROVIDERS.keys()) + ["Custom"]
         provider_combo = ttk.Combobox(row, textvariable=self.provider_var,
@@ -105,8 +109,7 @@ class ApiFrame(ttk.LabelFrame):
     def _toggle_show(self):
         self._show_keys = not self._show_keys
         show_char = "" if self._show_keys else "*"
-        if self._hf_entry:
-            self._hf_entry.configure(show=show_char)
+        self._hf_entry.configure(show=show_char)
         self._or_entry.configure(show=show_char)
         self._show_btn.configure(text="Hide" if self._show_keys else "Show")
 
@@ -120,23 +123,27 @@ class ApiFrame(ttk.LabelFrame):
             hf = self.hf_token_var.get().strip()
             or_key = self.openrouter_key_var.get().strip()
 
-            if not self._has_bundled:
-                if hf:
-                    try:
-                        import requests
-                        resp = requests.get(
-                            "https://huggingface.co/api/whoami-v2",
-                            headers={"Authorization": f"Bearer {hf}"},
-                            timeout=10,
-                        )
-                        if resp.status_code == 200:
-                            results.append("HF: OK")
-                        else:
-                            results.append(f"HF: {resp.status_code}")
-                    except Exception as e:
-                        results.append(f"HF: {type(e).__name__}")
+            if hf:
+                try:
+                    import requests
+                    resp = requests.get(
+                        "https://huggingface.co/api/whoami-v2",
+                        headers={"Authorization": f"Bearer {hf}"},
+                        timeout=10,
+                    )
+                    if resp.status_code == 200:
+                        results.append("HuggingFace: Valid")
+                    elif resp.status_code == 401:
+                        results.append("HuggingFace: Invalid token (401)")
+                    else:
+                        results.append(f"HuggingFace: Error ({resp.status_code})")
+                except Exception as e:
+                    results.append(f"HuggingFace: {type(e).__name__}")
+            else:
+                if self._has_bundled:
+                    results.append("HuggingFace: not set (bundled models OK)")
                 else:
-                    results.append("HF: not set")
+                    results.append("HuggingFace: not set")
 
             if or_key:
                 try:
@@ -150,16 +157,18 @@ class ApiFrame(ttk.LabelFrame):
                         timeout=10,
                     )
                     if resp.status_code == 200:
-                        results.append("API: OK")
+                        results.append("API: Valid")
+                    elif resp.status_code == 401:
+                        results.append("API: Invalid key (401)")
                     else:
-                        results.append(f"API: {resp.status_code}")
+                        results.append(f"API: Error ({resp.status_code})")
                 except Exception as e:
                     results.append(f"API: {type(e).__name__}")
             else:
                 results.append("API: not set")
 
             status_text = " | ".join(results)
-            all_ok = all("OK" in r for r in results if "not set" not in r)
+            all_ok = all("Valid" in r or "bundled" in r for r in results if "not set" not in r)
 
             try:
                 self.after(0, lambda: self._update_test_status(status_text, all_ok))

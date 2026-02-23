@@ -1,9 +1,11 @@
 """PyInstaller build wrapper for Scrivox.
 
 Build variants:
-  python build.py --full     Downloads diarization models, bundles into exe
-  python build.py --lite     No models bundled, smaller download
-  python build.py            Builds both variants
+  python build.py --lite      Transcription only, no pyannote (smallest)
+  python build.py --regular   All features, no bundled models
+  python build.py --full      All features + bundled diarization models
+  python build.py             Builds all 3 variants
+  python build.py --clean     Clean build/ and dist/ before building
 """
 
 import argparse
@@ -49,10 +51,11 @@ def download_diarization_models(models_dir):
     os.environ["HF_HOME"] = models_dir
     os.environ["HF_HUB_CACHE"] = hub_dir
 
+    # Model repos match defaults in scrivox/core/constants.py
     model_repos = [
-        "pyannote/speaker-diarization-3.1",
-        "pyannote/segmentation-3.0",
-        "speechbrain/spkrec-ecapa-voxceleb",
+        "pyannote/speaker-diarization-3.1",   # DEFAULT_DIARIZATION_MODEL
+        "pyannote/segmentation-3.0",           # DEFAULT_SEGMENTATION_MODEL
+        "speechbrain/spkrec-ecapa-voxceleb",   # DEFAULT_SPEAKER_EMBEDDING_MODEL
     ]
 
     try:
@@ -75,8 +78,16 @@ def download_diarization_models(models_dir):
         return False
 
 
-def run_build(project_dir, spec_file, variant_name, dist_name):
-    """Run PyInstaller build."""
+def _clean_build_dir(project_dir):
+    """Clear build/ directory between variants (different package sets)."""
+    build_dir = os.path.join(project_dir, "build")
+    if os.path.isdir(build_dir):
+        print("Clearing build/ for next variant...")
+        shutil.rmtree(build_dir)
+
+
+def run_build(project_dir, spec_file, variant_name, dist_name, variant):
+    """Run PyInstaller build for a specific variant."""
     print()
     print("=" * 60)
     print(f"  Building {variant_name}")
@@ -86,6 +97,7 @@ def run_build(project_dir, spec_file, variant_name, dist_name):
     t0 = time.time()
     env = os.environ.copy()
     env["SCRIVOX_DIST_NAME"] = dist_name
+    env["SCRIVOX_VARIANT"] = variant
 
     result = subprocess.run(
         [sys.executable, "-m", "PyInstaller", spec_file, "--noconfirm"],
@@ -123,11 +135,12 @@ def main():
     parser = argparse.ArgumentParser(description="Build Scrivox executable")
     parser.add_argument("--clean", action="store_true",
                         help="Remove build/ and dist/ before building")
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("--full", action="store_true",
-                       help="Build Full variant only (with bundled diarization models)")
-    group.add_argument("--lite", action="store_true",
-                       help="Build Lite variant only (no bundled models)")
+    parser.add_argument("--lite", action="store_true",
+                        help="Build Lite variant (transcription only, smallest)")
+    parser.add_argument("--regular", action="store_true",
+                        help="Build Regular variant (all features, no bundled models)")
+    parser.add_argument("--full", action="store_true",
+                        help="Build Full variant (all features + bundled diarization models)")
     args = parser.parse_args()
 
     project_dir = os.path.dirname(os.path.abspath(__file__))
@@ -146,8 +159,22 @@ def main():
                 print(f"Removing {d}/...")
                 shutil.rmtree(path)
 
-    build_full = args.full or (not args.full and not args.lite)
-    build_lite = args.lite or (not args.full and not args.lite)
+    # Default: build all 3 if no flags specified
+    build_lite = args.lite or (not args.lite and not args.regular and not args.full)
+    build_regular = args.regular or (not args.lite and not args.regular and not args.full)
+    build_full = args.full or (not args.lite and not args.regular and not args.full)
+
+    # ── Lite build (transcription only) ──
+    if build_lite:
+        if not run_build(project_dir, spec_file, "Scrivox Lite", "Scrivox-Lite", "lite"):
+            sys.exit(1)
+        _clean_build_dir(project_dir)
+
+    # ── Regular build (all features, no bundled models) ──
+    if build_regular:
+        if not run_build(project_dir, spec_file, "Scrivox", "Scrivox", "regular"):
+            sys.exit(1)
+        _clean_build_dir(project_dir)
 
     # ── Full build (with models) ──
     full_explicitly_requested = args.full
@@ -162,29 +189,14 @@ def main():
                 build_full = False
 
         if build_full:
-            if not run_build(project_dir, spec_file, "Scrivox Full", "Scrivox"):
+            if not run_build(project_dir, spec_file, "Scrivox Full", "Scrivox-Full", "full"):
                 sys.exit(1)
 
             # Copy models into dist
-            dist_models = os.path.join(project_dir, "dist", "Scrivox", "models")
+            dist_models = os.path.join(project_dir, "dist", "Scrivox-Full", "models")
             if os.path.isdir(models_dir) and not os.path.isdir(dist_models):
                 print("Copying bundled models into dist...")
                 shutil.copytree(models_dir, dist_models)
-
-    # ── Lite build (no models) ──
-    if build_lite:
-        # Temporarily hide models dir so the spec doesn't pick it up
-        models_backup = None
-        if os.path.isdir(models_dir):
-            models_backup = models_dir + "_backup"
-            os.rename(models_dir, models_backup)
-
-        try:
-            if not run_build(project_dir, spec_file, "Scrivox Lite", "Scrivox-Lite"):
-                sys.exit(1)
-        finally:
-            if models_backup and os.path.isdir(models_backup):
-                os.rename(models_backup, models_dir)
 
 
 if __name__ == "__main__":

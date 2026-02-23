@@ -1,5 +1,6 @@
-"""Media utilities: ffmpeg checks, video detection, duration, WAV extraction."""
+"""Media utilities: ffmpeg checks, video detection, duration, WAV extraction, audio tracks."""
 
+import json as _json
 import os
 import subprocess
 import sys
@@ -50,14 +51,57 @@ def get_media_duration(file_path):
         return None
 
 
-def extract_wav(input_path, on_progress=print):
-    """Extract audio to WAV for diarization. Returns path to temp WAV file."""
+def list_audio_tracks(file_path):
+    """Return list of audio track dicts via ffprobe.
+
+    Each dict: {index, codec, language, channels, sample_rate, title, is_default}
+    """
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a",
+             "-show_entries", "stream=index,codec_name,channels,sample_rate",
+             "-show_entries", "stream_tags=language,title",
+             "-show_entries", "stream_disposition=default",
+             "-of", "json", file_path],
+            capture_output=True, text=True, timeout=15,
+        )
+        data = _json.loads(result.stdout)
+    except Exception:
+        return []
+
+    streams = data.get("streams", [])
+    tracks = []
+    for i, stream in enumerate(streams):
+        tags = stream.get("tags", {})
+        disposition = stream.get("disposition", {})
+        tracks.append({
+            "index": i,
+            "codec": stream.get("codec_name", "unknown"),
+            "language": tags.get("language", ""),
+            "channels": stream.get("channels", 0),
+            "sample_rate": stream.get("sample_rate", ""),
+            "title": tags.get("title", ""),
+            "is_default": bool(disposition.get("default", 0)),
+        })
+    return tracks
+
+
+def extract_wav(input_path, track_index=0, on_progress=print):
+    """Extract audio to WAV for diarization. Returns path to temp WAV file.
+
+    Args:
+        input_path: Path to the media file.
+        track_index: Audio stream index to extract (default 0 = first audio track).
+        on_progress: Progress callback.
+    """
     fd, wav_path = tempfile.mkstemp(suffix=".wav")
     os.close(fd)
-    on_progress("Extracting audio to WAV for diarization...")
+    on_progress(f"Extracting audio to WAV (track {track_index})...")
     try:
         subprocess.run(
-            ["ffmpeg", "-y", "-i", input_path, "-ac", "1", "-ar", "16000", "-vn", wav_path],
+            ["ffmpeg", "-y", "-i", input_path,
+             "-map", f"0:a:{track_index}",
+             "-ac", "1", "-ar", "16000", "-vn", wav_path],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True,
             timeout=600,
         )

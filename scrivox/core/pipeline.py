@@ -11,10 +11,10 @@ from typing import Callable, List, Optional
 import torch
 
 from .constants import (
-    AUDIO_EXTENSIONS, DEFAULT_SUMMARY_MODEL, DEFAULT_VISION_MODEL,
-    VIDEO_EXTENSIONS,
+    AUDIO_EXTENSIONS, DEFAULT_DIARIZATION_MODEL, DEFAULT_SUMMARY_MODEL,
+    DEFAULT_VISION_MODEL, VIDEO_EXTENSIONS,
 )
-from .media import check_ffmpeg, get_media_duration, has_video_stream
+from .media import check_ffmpeg, extract_wav, get_media_duration, has_video_stream
 from .transcriber import clean_transcription, transcribe_audio
 from .diarizer import assign_speakers, diarize_audio, rename_speakers, _get_bundled_models_dir
 from .vision import analyze_keyframes, extract_keyframes
@@ -35,6 +35,7 @@ class PipelineConfig:
     summarize: bool = False
 
     # Diarization
+    diarization_model: str = DEFAULT_DIARIZATION_MODEL
     num_speakers: Optional[int] = None
     min_speakers: Optional[int] = None
     max_speakers: Optional[int] = None
@@ -59,6 +60,9 @@ class PipelineConfig:
     # Credentials
     hf_token: Optional[str] = None
     openrouter_key: Optional[str] = None
+
+    # Multi-track
+    audio_track: int = 0  # Audio stream index for multi-track videos
 
     # Cache
     clear_cache: bool = False
@@ -251,8 +255,18 @@ class TranscriptionPipeline:
                 self.on_progress(f"Warning: Cache file corrupt ({e}), re-transcribing.")
 
         if not cache_hit:
+            # Pre-extract audio for non-default tracks
+            transcribe_path = cfg.input_path
+            _pre_extracted_wav = None
+            if cfg.audio_track != 0:
+                _pre_extracted_wav = extract_wav(
+                    cfg.input_path, track_index=cfg.audio_track,
+                    on_progress=self.on_progress,
+                )
+                transcribe_path = _pre_extracted_wav
+
             segments, info = transcribe_audio(
-                cfg.input_path, cfg.model, cfg.language,
+                transcribe_path, cfg.model, cfg.language,
                 on_progress=self.on_progress,
             )
             detected_lang = cfg.language or info.language
@@ -270,11 +284,14 @@ class TranscriptionPipeline:
                 current_step += 1
                 self.on_step(current_step, total_steps, "Diarizing")
                 self.on_progress("")
+                diarize_path = _pre_extracted_wav or cfg.input_path
                 speaker_segments = diarize_audio(
-                    cfg.input_path, hf_token,
+                    diarize_path, hf_token,
                     num_speakers=cfg.num_speakers,
                     min_speakers=cfg.min_speakers,
                     max_speakers=cfg.max_speakers,
+                    diarization_model=cfg.diarization_model,
+                    audio_track=cfg.audio_track,
                     on_progress=self.on_progress,
                 )
                 segments = assign_speakers(segments, speaker_segments, cfg.speaker_names)
@@ -298,6 +315,10 @@ class TranscriptionPipeline:
                 self.on_progress(f"Cached transcription to {cache_path}")
             except OSError as e:
                 self.on_progress(f"Warning: Could not save cache: {e}")
+            finally:
+                # Clean up pre-extracted WAV
+                if _pre_extracted_wav and os.path.exists(_pre_extracted_wav):
+                    os.remove(_pre_extracted_wav)
         else:
             # Advance step counter for skipped diarize
             if cfg.diarize:

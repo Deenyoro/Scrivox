@@ -10,7 +10,11 @@ warnings.filterwarnings("ignore", category=UserWarning)
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
 
-from .core.constants import DEFAULT_VISION_MODEL, DEFAULT_SUMMARY_MODEL, OUTPUT_FORMATS
+from .core.constants import (
+    DEFAULT_DIARIZATION_MODEL, DEFAULT_VISION_MODEL, DEFAULT_SUMMARY_MODEL,
+    OUTPUT_FORMATS,
+)
+from .core.features import has_diarization, has_advanced_features, get_variant_name
 from .core.pipeline import PipelineConfig, PipelineError, TranscriptionPipeline
 
 
@@ -27,6 +31,8 @@ def build_parser():
   python main.py video.mp4 --diarize --format srt -o subtitles.srt
   python main.py video.mp4 --diarize --speaker-names "Alice,Bob"
   python main.py meeting.mp4 --all --format md -o minutes.md
+  python main.py video.mp4 --list-tracks
+  python main.py video.mp4 --audio-track 1 --language ja
         """,
     )
     parser.add_argument("input", help="Audio or video file to transcribe")
@@ -50,6 +56,8 @@ def build_parser():
                                help="Maximum number of speakers expected")
     diarize_group.add_argument("--speaker-names", default=None,
                                help="Comma-separated speaker names, e.g. 'Alice,Bob,Charlie'")
+    diarize_group.add_argument("--diarization-model", default=DEFAULT_DIARIZATION_MODEL,
+                               help=f"Diarization model ID or local path (default: {DEFAULT_DIARIZATION_MODEL})")
 
     # Vision options
     vision_group = parser.add_argument_group("Vision Analysis")
@@ -68,6 +76,13 @@ def build_parser():
                                help="Generate meeting summary with key points and action items")
     summary_group.add_argument("--summary-model", default=DEFAULT_SUMMARY_MODEL,
                                help=f"LLM model for summary (default: {DEFAULT_SUMMARY_MODEL})")
+
+    # Multi-track options
+    track_group = parser.add_argument_group("Audio Tracks")
+    track_group.add_argument("--audio-track", type=int, default=0,
+                             help="Audio stream index for multi-track videos (default: 0)")
+    track_group.add_argument("--list-tracks", action="store_true",
+                             help="List audio tracks in the file and exit")
 
     # Output options
     output_group = parser.add_argument_group("Output")
@@ -101,11 +116,60 @@ def run_cli(argv=None):
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    # Expand --all
+    # Handle --list-tracks
+    if args.list_tracks:
+        from .core.media import list_audio_tracks
+        if not os.path.isfile(args.input):
+            print(f"Error: File not found: {args.input}", file=sys.stderr)
+            sys.exit(1)
+        tracks = list_audio_tracks(args.input)
+        if not tracks:
+            print("No audio tracks found.")
+        else:
+            for t in tracks:
+                parts = [f"Track {t['index']}: {t['codec'].upper()}"]
+                if t.get("language"):
+                    parts.append(t["language"].capitalize())
+                ch = t.get("channels", 0)
+                if ch == 1:
+                    parts.append("mono")
+                elif ch == 2:
+                    parts.append("stereo")
+                elif ch == 6:
+                    parts.append("5.1")
+                elif ch > 0:
+                    parts.append(f"{ch}ch")
+                if t.get("title"):
+                    parts.append(t["title"])
+                if t.get("is_default"):
+                    parts.append("(default)")
+                print("  " + ", ".join(parts))
+        sys.exit(0)
+
+    # Expand --all with feature availability checks
     if args.all:
-        args.diarize = True
-        args.vision = True
-        args.summarize = True
+        args.diarize = has_diarization()
+        args.vision = has_advanced_features()
+        args.summarize = has_advanced_features()
+
+        if not has_diarization():
+            variant = get_variant_name()
+            print(f"Notice: --all in {variant} build enables transcription only "
+                  f"(diarization/vision/summary not available).", file=sys.stderr)
+
+    # Feature availability checks for explicit flags
+    if args.diarize and not has_diarization():
+        print(f"Error: --diarize is not available in the {get_variant_name()} build. "
+              "Use the Regular or Full build for diarization.", file=sys.stderr)
+        sys.exit(1)
+    if args.vision and not has_advanced_features():
+        print(f"Error: --vision is not available in the {get_variant_name()} build. "
+              "Use the Regular or Full build for vision analysis.", file=sys.stderr)
+        sys.exit(1)
+    if args.summarize and not has_advanced_features():
+        print(f"Error: --summarize is not available in the {get_variant_name()} build. "
+              "Use the Regular or Full build for meeting summaries.", file=sys.stderr)
+        sys.exit(1)
 
     # Validate input
     if not os.path.isfile(args.input):
@@ -144,6 +208,7 @@ def run_cli(argv=None):
         diarize=args.diarize,
         vision=args.vision,
         summarize=args.summarize,
+        diarization_model=args.diarization_model,
         num_speakers=args.num_speakers,
         min_speakers=args.min_speakers,
         max_speakers=args.max_speakers,
@@ -158,6 +223,7 @@ def run_cli(argv=None):
         api_base=args.api_base,
         hf_token=args.hf_token,
         openrouter_key=api_key,
+        audio_track=args.audio_track,
         clear_cache=args.clear_cache,
     )
 

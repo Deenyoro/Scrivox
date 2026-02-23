@@ -6,6 +6,7 @@ from tkinter import ttk, filedialog
 
 from ...core.constants import OUTPUT_FORMATS
 from ..theme import COLORS
+from .settings_frame import ToolTip
 
 
 class OutputFrame(ttk.LabelFrame):
@@ -36,9 +37,10 @@ class OutputFrame(ttk.LabelFrame):
             side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 4))
         ttk.Button(row, text="...", command=self._browse_output, width=3).pack(side=tk.RIGHT)
 
-        ttk.Checkbutton(self, text="Speaker labels in subtitles (SRT/VTT)",
-                        variable=self.subtitle_speakers_var).pack(
-            padx=8, pady=(0, 4), anchor=tk.W)
+        sub_cb = ttk.Checkbutton(self, text="Speaker labels in subtitles (SRT/VTT)",
+                                  variable=self.subtitle_speakers_var)
+        sub_cb.pack(padx=8, pady=(0, 4), anchor=tk.W)
+        ToolTip(sub_cb, "Include SPEAKER_01 labels in SRT/VTT subtitle output")
 
         ttk.Label(self, text="Leave path blank for auto-naming or console output",
                   style="Dim.TLabel").pack(padx=8, pady=(0, 6), anchor=tk.W)

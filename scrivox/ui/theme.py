@@ -10,7 +10,7 @@ COLORS = {
     "bg_secondary": "#252535",
     "bg_input": "#2a2a3d",
     "fg": "#cdd6f4",
-    "fg_dim": "#6c7086",
+    "fg_dim": "#8a8ea8",
     "fg_bright": "#ffffff",
     "accent": "#89b4fa",
     "accent_hover": "#74c7ec",
@@ -45,8 +45,23 @@ FONTS = {
 }
 
 
+def _resolve_mono_font():
+    """Find the best available monospace font."""
+    import tkinter.font as tkfont
+    available = tkfont.families()
+    for candidate in ("Cascadia Code", "Consolas", "Courier New"):
+        if candidate in available:
+            return candidate
+    return "TkFixedFont"
+
+
 def configure_theme(root):
     """Apply the dark theme to all ttk widgets."""
+    # Resolve monospace font with fallback chain
+    mono = _resolve_mono_font()
+    FONTS["mono"] = (mono, 10)
+    FONTS["mono_small"] = (mono, 9)
+
     style = ttk.Style(root)
     style.theme_use("clam")
 

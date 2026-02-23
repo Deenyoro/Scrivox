@@ -47,18 +47,24 @@ def _setup_bundled_cache():
 
 
 def diarize_audio(audio_path, hf_token, num_speakers=None, min_speakers=None,
-                  max_speakers=None, on_progress=print):
+                  max_speakers=None, diarization_model=None, audio_track=0,
+                  on_progress=print):
     """Run speaker diarization on audio. Returns list of speaker segments.
 
     If bundled models are found in a 'models/' directory next to the exe,
     they are used directly and no HF token is needed for download.
     """
     from pyannote.audio import Pipeline
+    from .constants import DEFAULT_DIARIZATION_MODEL
+
+    if not diarization_model:
+        diarization_model = DEFAULT_DIARIZATION_MODEL
 
     wav_path = None
     ext = os.path.splitext(audio_path)[1].lower()
     if ext not in (".wav", ".wave"):
-        wav_path = extract_wav(audio_path, on_progress=on_progress)
+        wav_path = extract_wav(audio_path, track_index=audio_track,
+                               on_progress=on_progress)
         diarize_input = wav_path
     else:
         diarize_input = audio_path
@@ -71,10 +77,10 @@ def diarize_audio(audio_path, hf_token, num_speakers=None, min_speakers=None,
         else:
             on_progress("Downloading diarization models (first run only)...")
 
-        on_progress("Loading pyannote speaker-diarization-3.1 on CUDA...")
+        on_progress(f"Loading {diarization_model} on CUDA...")
         with _allow_unsafe_torch_load():
             pipeline = Pipeline.from_pretrained(
-                "pyannote/speaker-diarization-3.1",
+                diarization_model,
                 use_auth_token=hf_token,
             )
         pipeline.to(torch.device("cuda"))

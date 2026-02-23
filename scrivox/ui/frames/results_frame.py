@@ -46,7 +46,8 @@ class ResultsFrame(ttk.LabelFrame):
         btn_row = ttk.Frame(self)
         btn_row.pack(fill=tk.X, padx=4, pady=(0, 4))
 
-        ttk.Button(btn_row, text="Copy", command=self._copy).pack(side=tk.LEFT, padx=(0, 4))
+        self._copy_btn = ttk.Button(btn_row, text="Copy", command=self._copy)
+        self._copy_btn.pack(side=tk.LEFT, padx=(0, 4))
         ttk.Button(btn_row, text="Save As...", command=self._save_as).pack(side=tk.LEFT, padx=(0, 4))
         self._open_btn = ttk.Button(btn_row, text="Open Folder", command=self._open_folder,
                                      state=tk.DISABLED)
@@ -78,13 +79,16 @@ class ResultsFrame(ttk.LabelFrame):
         self._open_btn.configure(state=tk.DISABLED)
 
     def _copy(self):
-        """Copy full text to clipboard."""
+        """Copy full text to clipboard with visual feedback."""
         self.text_widget.configure(state=tk.NORMAL)
         text = self.text_widget.get("1.0", tk.END).strip()
         self.text_widget.configure(state=tk.DISABLED)
         if text:
             self.clipboard_clear()
             self.clipboard_append(text)
+            # Flash "Copied!" feedback
+            self._copy_btn.configure(text="Copied!")
+            self.after(1500, lambda: self._copy_btn.configure(text="Copy"))
 
     def _save_as(self):
         """Save results to a file."""

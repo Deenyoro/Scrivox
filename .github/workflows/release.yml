@@ -43,6 +43,34 @@ jobs:
             echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           fi
 
+      # ── Lite build (transcription only) ──
+      - name: Build Lite variant
+        run: python build.py --clean --lite
+
+      - name: Archive Lite variant
+        shell: bash
+        run: |
+          if [ -d "./dist/Scrivox-Lite" ]; then
+            7z a "Scrivox-Lite-${{ steps.tag.outputs.TAG }}-win64.7z" ./dist/Scrivox-Lite/*
+          else
+            echo "Lite build directory not found, skipping archive"
+            exit 1
+          fi
+
+      # ── Regular build (all features, no bundled models) ──
+      - name: Build Regular variant
+        run: python build.py --clean --regular
+
+      - name: Archive Regular variant
+        shell: bash
+        run: |
+          if [ -d "./dist/Scrivox" ]; then
+            7z a "Scrivox-${{ steps.tag.outputs.TAG }}-win64.7z" ./dist/Scrivox/*
+          else
+            echo "Regular build directory not found, skipping archive"
+            exit 1
+          fi
+
       # ── Full build (with bundled diarization models) ──
       - name: Build Full variant
         env:
@@ -52,24 +80,10 @@ jobs:
       - name: Archive Full variant
         shell: bash
         run: |
-          if [ -d "./dist/Scrivox" ]; then
-            7z a "Scrivox-Full-${{ steps.tag.outputs.TAG }}-win64.7z" ./dist/Scrivox/*
+          if [ -d "./dist/Scrivox-Full" ]; then
+            7z a "Scrivox-Full-${{ steps.tag.outputs.TAG }}-win64.7z" ./dist/Scrivox-Full/*
           else
             echo "Full build directory not found, skipping archive"
-            exit 1
-          fi
-
-      # ── Lite build (no bundled models) ──
-      - name: Build Lite variant
-        run: python build.py --lite
-
-      - name: Archive Lite variant
-        shell: bash
-        run: |
-          if [ -d "./dist/Scrivox-Lite" ]; then
-            7z a "Scrivox-Lite-${{ steps.tag.outputs.TAG }}-win64.7z" ./dist/Scrivox-Lite/*
-          else
-            echo "Lite build directory not found, skipping archive"
             exit 1
           fi
 
@@ -86,10 +100,11 @@ jobs:
 
             ### Downloads
 
-            | Variant | Description |
-            |---------|-------------|
-            | **Scrivox-Full** | Diarization models included — works out of the box |
-            | **Scrivox-Lite** | Smaller download — provide your own HF token for diarization |
+            | Variant | Size | Features |
+            |---------|------|----------|
+            | **Scrivox-Lite** | ~200-300 MB | Transcription only |
+            | **Scrivox** | ~500-800 MB | All features, provide own HF token |
+            | **Scrivox-Full** | ~1.5-2 GB | All features + bundled models |
 
             ### Installation
             1. Download and extract the `.7z` archive
@@ -101,10 +116,11 @@ jobs:
             - NVIDIA GPU with CUDA support
 
             ### API Keys (add to .env or enter in GUI)
-            - **HF_TOKEN** — Required for diarization in Lite variant ([get one](https://huggingface.co/settings/tokens))
+            - **HF_TOKEN** — Required for diarization in Lite/Regular variants ([get one](https://huggingface.co/settings/tokens))
             - **OPENROUTER_API_KEY** — Required for vision/summary features ([get one](https://openrouter.ai/keys))
           files: |
-            Scrivox-Full-${{ steps.tag.outputs.TAG }}-win64.7z
             Scrivox-Lite-${{ steps.tag.outputs.TAG }}-win64.7z
+            Scrivox-${{ steps.tag.outputs.TAG }}-win64.7z
+            Scrivox-Full-${{ steps.tag.outputs.TAG }}-win64.7z
           draft: false
           prerelease: false
