@@ -154,10 +154,12 @@ def configure_theme(root):
 
     # ── Scrollbar ──
     style.configure("Vertical.TScrollbar",
-                     background=COLORS["fg_dim"],
+                     background=COLORS["border"],
                      troughcolor=COLORS["bg_secondary"],
-                     borderwidth=0, arrowsize=0, width=10)
+                     borderwidth=0, arrowsize=14, width=14,
+                     arrowcolor=COLORS["fg_dim"])
     style.map("Vertical.TScrollbar",
-              background=[("active", COLORS["fg"])])
+              background=[("active", COLORS["fg_dim"])],
+              arrowcolor=[("active", COLORS["fg"])])
 
     return style
