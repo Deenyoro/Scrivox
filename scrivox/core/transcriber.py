@@ -214,7 +214,7 @@ def _capitalize_text(text):
     text = re.sub(r'([.!?])\s+([a-z])', lambda m: m.group(1) + ' ' + m.group(2).upper(), text)
     text = re.sub(r"\bi\b", "I", text)
     for acronym in ("ai", "hr", "api", "pto", "sso", "saas", "usa", "uk", "eu",
-                     "ceo", "cto", "cfo", "coo", "vp", "qa", "kpi", "roi", "it",
+                     "ceo", "cto", "cfo", "coo", "vp", "qa", "kpi", "roi",
                      "pr", "ml", "sql", "url", "pdf", "faq", "gdpr", "eta", "asap", "rsvp"):
         text = re.sub(r'\b' + acronym + r'\b', acronym.upper(), text, flags=re.IGNORECASE)
     return text

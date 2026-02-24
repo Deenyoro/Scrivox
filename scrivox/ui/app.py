@@ -154,6 +154,18 @@ class ScrivoxApp(tk.Tk):
         left_canvas.bind("<Enter>", _bind_mousewheel)
         left_canvas.bind("<Leave>", _unbind_mousewheel)
 
+        # ── Start / Cancel buttons (top of left panel) ──
+        btn_frame = ttk.Frame(self._left_inner)
+        btn_frame.pack(fill=tk.X, padx=4, pady=(4, 6))
+
+        self._start_btn = ttk.Button(btn_frame, text="Start", style="Accent.TButton",
+                                      command=self._start_pipeline)
+        self._start_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+
+        self._cancel_btn = ttk.Button(btn_frame, text="Cancel", style="Cancel.TButton",
+                                       command=self._cancel_pipeline, state=tk.DISABLED)
+        self._cancel_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
         # Queue frame
         self.queue_frame = QueueFrame(
             self._left_inner, config_manager=self.config_manager,
@@ -184,18 +196,6 @@ class ScrivoxApp(tk.Tk):
             self.models_frame.pack(fill=tk.X, padx=4, pady=(0, 6))
         else:
             self.models_frame = None
-
-        # ── Start / Cancel buttons ──
-        btn_frame = ttk.Frame(self._left_inner)
-        btn_frame.pack(fill=tk.X, padx=4, pady=(4, 8))
-
-        self._start_btn = ttk.Button(btn_frame, text="Start", style="Accent.TButton",
-                                      command=self._start_pipeline)
-        self._start_btn.pack(fill=tk.X, pady=(0, 4))
-
-        self._cancel_btn = ttk.Button(btn_frame, text="Cancel", style="Cancel.TButton",
-                                       command=self._cancel_pipeline, state=tk.DISABLED)
-        self._cancel_btn.pack(fill=tk.X)
 
         # ── Separator ──
         ttk.Separator(main_frame, orient=tk.VERTICAL).pack(

@@ -25,7 +25,7 @@ def format_timestamp_human(seconds):
     return f"{m}:{s:02d}"
 
 
-def _merge_subtitle_segments(segments, max_chars=84, max_duration=7.0, max_gap=1.5):
+def _merge_subtitle_segments(segments, max_chars=84, max_duration=4.0, max_gap=0.8):
     """Merge consecutive segments into subtitle-sized blocks.
 
     Args:
@@ -71,12 +71,12 @@ def _merge_subtitle_segments(segments, max_chars=84, max_duration=7.0, max_gap=1
 
 
 def _wrap_subtitle_text(text, max_line=42):
-    """Wrap subtitle text to max two lines for readability."""
+    """Wrap subtitle text to two lines for readability."""
     if len(text) <= max_line:
         return text
-    wrapped = textwrap.fill(text, width=max_line, max_lines=2,
-                             break_long_words=False, break_on_hyphens=False)
-    return wrapped
+    lines = textwrap.wrap(text, width=max_line,
+                           break_long_words=False, break_on_hyphens=False)
+    return "\n".join(lines[:2])
 
 
 def format_output(segments, fmt="txt", diarized=False, visual_context=None,
