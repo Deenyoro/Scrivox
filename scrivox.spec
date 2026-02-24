@@ -9,6 +9,7 @@ Supports three variants via SCRIVOX_VARIANT env var:
 Set SCRIVOX_DIST_NAME env var to change output directory name (default: Scrivox).
 """
 
+import glob
 import os
 import sys
 from PyInstaller.utils.hooks import collect_all, copy_metadata
@@ -26,6 +27,31 @@ fw_datas, fw_binaries, fw_hiddenimports = collect_all('faster_whisper')
 all_datas = torch_datas + ct2_datas + fw_datas
 all_binaries = torch_binaries + ct2_binaries + fw_binaries
 all_hiddenimports = torch_hiddenimports + ct2_hiddenimports + fw_hiddenimports
+
+# ── Ensure CUDA DLLs from torch/lib are included ──
+# collect_all('torch') should get these, but we explicitly add them as a safety net
+import torch as _torch
+_torch_lib = os.path.join(os.path.dirname(_torch.__file__), 'lib')
+for _dll in glob.glob(os.path.join(_torch_lib, '*.dll')):
+    _dll_name = os.path.basename(_dll)
+    # Check if already in binaries
+    _already = any(_dll_name == os.path.basename(b[0]) for b in all_binaries)
+    if not _already:
+        all_binaries.append((_dll, 'torch/lib'))
+
+# ── Collect nvidia CUDA runtime packages if present ──
+for _nvidia_pkg in [
+    'nvidia.cuda_runtime', 'nvidia.cublas', 'nvidia.cufft',
+    'nvidia.curand', 'nvidia.cusolver', 'nvidia.cusparse',
+    'nvidia.cudnn', 'nvidia.nccl', 'nvidia.nvtx',
+]:
+    try:
+        _d, _b, _h = collect_all(_nvidia_pkg)
+        all_datas += _d
+        all_binaries += _b
+        all_hiddenimports += _h
+    except Exception:
+        pass
 
 # ── Regular/Full only (diarization + advanced features) ──
 if not is_lite:
@@ -115,7 +141,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,  # UPX breaks CUDA DLLs
-    console=True,  # Dual mode: GUI when double-clicked, CLI from terminal
+    console=False,  # Windowed mode — no CMD window for GUI
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

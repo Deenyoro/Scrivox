@@ -27,11 +27,17 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install PyTorch (CUDA 12.1)
-        run: pip install torch --index-url https://download.pytorch.org/whl/cu121
+      - name: Install PyTorch with CUDA 12.1
+        run: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
 
       - name: Install dependencies
         run: pip install -r requirements.txt pyinstaller
+
+      - name: Force CUDA torch (prevent PyPI CPU override from transitive deps)
+        run: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121 --force-reinstall --no-deps
+
+      - name: Verify CUDA torch
+        run: python -c "import torch; assert 'cu' in torch.__version__, f'Expected CUDA torch, got {torch.__version__}'; print(f'torch {torch.__version__} OK')"
 
       - name: Determine tag name
         id: tag
