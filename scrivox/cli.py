@@ -8,7 +8,11 @@ import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 
 from dotenv import load_dotenv
-load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+if getattr(sys, 'frozen', False):
+    _dotenv_base = os.path.dirname(sys.executable)
+else:
+    _dotenv_base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(_dotenv_base, ".env"))
 
 from .core.constants import (
     DEFAULT_DIARIZATION_MODEL, DEFAULT_VISION_MODEL, DEFAULT_SUMMARY_MODEL,
@@ -93,6 +97,14 @@ def build_parser():
                               help="Output format (default: txt)")
     output_group.add_argument("--subtitle-speakers", action="store_true",
                               help="Include speaker labels in SRT/VTT subtitles (off by default)")
+    output_group.add_argument("--subtitle-max-chars", type=int, default=84,
+                              help="Max characters per subtitle cue (default: 84)")
+    output_group.add_argument("--subtitle-max-duration", type=float, default=4.0,
+                              help="Max seconds per subtitle cue (default: 4.0)")
+    output_group.add_argument("--subtitle-max-gap", type=float, default=0.8,
+                              help="Max gap in seconds to merge across (default: 0.8)")
+    output_group.add_argument("--confidence-threshold", type=float, default=0.50,
+                              help="Min avg word probability to keep a segment (default: 0.50)")
 
     # Cache / credential options
     parser.add_argument("--clear-cache", action="store_true",
@@ -220,6 +232,10 @@ def run_cli(argv=None):
         output_format=args.format,
         output_path=args.output,
         subtitle_speakers=args.subtitle_speakers,
+        subtitle_max_chars=args.subtitle_max_chars,
+        subtitle_max_duration=args.subtitle_max_duration,
+        subtitle_max_gap=args.subtitle_max_gap,
+        confidence_threshold=args.confidence_threshold,
         api_base=args.api_base,
         hf_token=args.hf_token,
         openrouter_key=api_key,

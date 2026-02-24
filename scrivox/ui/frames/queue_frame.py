@@ -53,10 +53,10 @@ class QueueFrame(ttk.LabelFrame):
         self._tree.heading("lang", text="Lang")
         self._tree.heading("status", text="Status")
 
-        self._tree.column("file", width=200, minwidth=100)
-        self._tree.column("track", width=100, minwidth=60)
-        self._tree.column("lang", width=50, minwidth=40)
-        self._tree.column("status", width=80, minwidth=60)
+        self._tree.column("file", width=160, minwidth=100, stretch=True)
+        self._tree.column("track", width=80, minwidth=50, stretch=False)
+        self._tree.column("lang", width=40, minwidth=35, stretch=False)
+        self._tree.column("status", width=60, minwidth=50, stretch=False)
 
         scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self._tree.yview)
         self._tree.configure(yscrollcommand=scrollbar.set)

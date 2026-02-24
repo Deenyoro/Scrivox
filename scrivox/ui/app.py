@@ -189,13 +189,11 @@ class ScrivoxApp(tk.Tk):
         else:
             self.api_frame = None
 
-        # Models (Advanced) frame (conditional on diarization)
-        if has_diarization():
-            from .frames.models_frame import ModelsFrame
-            self.models_frame = ModelsFrame(self._left_inner)
-            self.models_frame.pack(fill=tk.X, padx=4, pady=(0, 6))
-        else:
-            self.models_frame = None
+        # Advanced settings frame (always shown)
+        from .frames.models_frame import ModelsFrame
+        self.models_frame = ModelsFrame(self._left_inner,
+                                         show_diarization=has_diarization())
+        self.models_frame.pack(fill=tk.X, padx=4, pady=(0, 6))
 
         # ── Separator ──
         ttk.Separator(main_frame, orient=tk.VERTICAL).pack(
@@ -341,7 +339,9 @@ class ScrivoxApp(tk.Tk):
                 messagebox.showerror("Error",
                                      "Vision/Summary features are not available in the Lite build.")
                 return False
-            if not self.api_frame.get_openrouter_key():
+            # Ollama (local) doesn't require an API key
+            is_local = "localhost" in (self.api_frame.get_api_base() or "")
+            if not self.api_frame.get_openrouter_key() and not is_local:
                 messagebox.showerror("Error",
                                      "Vision/Summary requires an LLM API key.\n"
                                      "Enter it in the API Keys section.")
@@ -357,6 +357,9 @@ class ScrivoxApp(tk.Tk):
         file_path = job.file_path if job else self.queue_frame.file_path
         audio_track = job.audio_track if job else 0
         language = job.language_override if (job and job.language_override) else (s.language_var.get() or None)
+
+        # Get advanced settings from models frame
+        adv = self.models_frame.get_settings_dict() if self.models_frame else {}
 
         return PipelineConfig(
             input_path=file_path,
@@ -378,6 +381,10 @@ class ScrivoxApp(tk.Tk):
             output_format=self.output_frame.format_var.get(),
             output_path=self.output_frame.output_path_var.get() or None,
             subtitle_speakers=self.output_frame.subtitle_speakers_var.get(),
+            subtitle_max_chars=adv.get("subtitle_max_chars", 84),
+            subtitle_max_duration=adv.get("subtitle_max_duration", 4.0),
+            subtitle_max_gap=adv.get("subtitle_max_gap", 0.8),
+            confidence_threshold=adv.get("confidence_threshold", 0.50),
             api_base=(self.api_frame.get_api_base() if self.api_frame else None),
             hf_token=(self.api_frame.get_hf_token() if self.api_frame else None),
             openrouter_key=(self.api_frame.get_openrouter_key() if self.api_frame else None),

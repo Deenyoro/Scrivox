@@ -220,13 +220,14 @@ def _capitalize_text(text):
     return text
 
 
-def clean_transcription(segments, language=None):
+def clean_transcription(segments, language=None, confidence_threshold=0.50):
     """Post-process transcript segments to fix common Whisper issues.
 
     Args:
         segments: List of segment dicts with "text", "start", "end", etc.
         language: Primary language code (e.g. "ko", "en").  Used to avoid
                   destroying non-Latin text.
+        confidence_threshold: Minimum average word probability to keep a segment.
     """
     cleaned = []
     for seg in segments:
@@ -256,7 +257,7 @@ def clean_transcription(segments, language=None):
         seg["text"] = text
         cleaned.append(seg)
 
-    cleaned = _filter_low_confidence_segments(cleaned)
+    cleaned = _filter_low_confidence_segments(cleaned, min_avg_prob=confidence_threshold)
 
     # Remove consecutive duplicate segments
     deduped = []

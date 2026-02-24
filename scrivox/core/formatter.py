@@ -80,7 +80,9 @@ def _wrap_subtitle_text(text, max_line=42):
 
 
 def format_output(segments, fmt="txt", diarized=False, visual_context=None,
-                  summary=None, metadata=None, subtitle_speakers=False):
+                  summary=None, metadata=None, subtitle_speakers=False,
+                  subtitle_max_chars=84, subtitle_max_duration=4.0,
+                  subtitle_max_gap=0.8):
     """Format transcript segments into the requested output format.
 
     Args:
@@ -91,6 +93,9 @@ def format_output(segments, fmt="txt", diarized=False, visual_context=None,
         summary: Optional meeting summary string
         metadata: Optional metadata dict
         subtitle_speakers: Show speaker labels in SRT/VTT subtitles (default: off)
+        subtitle_max_chars: Max characters per subtitle cue
+        subtitle_max_duration: Max seconds per subtitle cue
+        subtitle_max_gap: Max gap in seconds to merge across
     """
     lines = []
 
@@ -183,7 +188,9 @@ def format_output(segments, fmt="txt", diarized=False, visual_context=None,
     elif fmt == "srt":
         # Sort segments by start time and merge into proper subtitle blocks
         sorted_segs = sorted(segments, key=lambda x: x["start"])
-        merged = _merge_subtitle_segments(sorted_segs)
+        merged = _merge_subtitle_segments(sorted_segs, max_chars=subtitle_max_chars,
+                                          max_duration=subtitle_max_duration,
+                                          max_gap=subtitle_max_gap)
         for i, seg in enumerate(merged, 1):
             start_ts = format_timestamp(seg["start"], "srt")
             end_ts = format_timestamp(seg["end"], "srt")
@@ -202,7 +209,9 @@ def format_output(segments, fmt="txt", diarized=False, visual_context=None,
         lines.append("")
         primary_lang = (metadata or {}).get("detected_language", "")
         sorted_segs = sorted(segments, key=lambda x: x["start"])
-        merged = _merge_subtitle_segments(sorted_segs)
+        merged = _merge_subtitle_segments(sorted_segs, max_chars=subtitle_max_chars,
+                                          max_duration=subtitle_max_duration,
+                                          max_gap=subtitle_max_gap)
         for seg in merged:
             start_ts = format_timestamp(seg["start"], "vtt")
             end_ts = format_timestamp(seg["end"], "vtt")

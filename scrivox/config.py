@@ -55,6 +55,10 @@ _DEFAULT_CONFIG = {
         "summary_model": "google/gemini-2.5-flash",
         "diarization_model": "pyannote/speaker-diarization-3.1",
         "use_system_cuda": False,
+        "subtitle_max_chars": 84,
+        "subtitle_max_duration": 4.0,
+        "subtitle_max_gap": 0.8,
+        "confidence_threshold": 0.50,
     },
     "api": {
         "provider": "OpenRouter",
@@ -64,7 +68,6 @@ _DEFAULT_CONFIG = {
         "geometry": "",
         "last_input_dir": "",
         "last_output_dir": "",
-        "sash_position": None,
         "preferred_language": "",
         "recent_files": [],
     },

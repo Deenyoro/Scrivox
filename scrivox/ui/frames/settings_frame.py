@@ -125,9 +125,6 @@ class SettingsFrame(ttk.Frame):
                                  command=self._toggle_diarize)
             cb.pack(padx=8, pady=(8, 2), anchor=tk.W)
             ToolTip(cb, "Identify and label different speakers\nRequires HuggingFace token")
-        else:
-            ttk.Label(features_frame, text="Diarize (speaker labels) — not available (Lite build)",
-                      style="Dim.TLabel").pack(padx=8, pady=(8, 2), anchor=tk.W)
 
         if has_advanced_features():
             cb_vision = ttk.Checkbutton(features_frame, text="Vision (keyframe analysis)",
@@ -141,17 +138,11 @@ class SettingsFrame(ttk.Frame):
                                          command=self._toggle_summary)
             cb_summary.pack(padx=8, pady=(2, 8), anchor=tk.W)
             ToolTip(cb_summary, "Generate meeting summary with key points\nRequires LLM API key")
-        else:
-            ttk.Label(features_frame, text="Vision / Summarize — not available (Lite build)",
-                      style="Dim.TLabel").pack(padx=8, pady=2, anchor=tk.W)
 
         if not has_diarization():
-            ttk.Label(features_frame, text="Transcription only (Lite build)",
-                      style="Dim.TLabel").pack(padx=8, pady=(2, 8), anchor=tk.W)
-        elif not has_advanced_features():
-            pass  # diarize available but not vision/summary (shouldn't happen)
-        else:
-            pass  # all features available
+            ttk.Label(features_frame,
+                      text="Upgrade to Regular or Full build for diarization,\nvision, and summary features",
+                      style="Dim.TLabel").pack(padx=8, pady=(8, 8), anchor=tk.W)
 
         # ── DIARIZATION SUB-SETTINGS ──
         self._diarize_frame = ttk.LabelFrame(self, text="DIARIZATION")

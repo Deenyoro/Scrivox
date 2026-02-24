@@ -92,10 +92,9 @@ def describe_keyframe(image_path, timestamp, api_key, vision_model, api_base=Non
         ],
         "max_tokens": 200,
     }
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
 
     from .constants import LLM_PROVIDERS, DEFAULT_LLM_PROVIDER
     url = api_base or LLM_PROVIDERS[DEFAULT_LLM_PROVIDER]

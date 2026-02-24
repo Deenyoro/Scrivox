@@ -79,10 +79,9 @@ Be concise and factual. Only include information actually present in the transcr
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 2000,
     }
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
 
     from .constants import LLM_PROVIDERS, DEFAULT_LLM_PROVIDER
     url = api_base or LLM_PROVIDERS[DEFAULT_LLM_PROVIDER]

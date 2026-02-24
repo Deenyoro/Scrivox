@@ -97,8 +97,8 @@ def configure_theme(root):
                      padding=(12, 6), borderwidth=0)
     style.map("TButton",
               background=[("active", COLORS["button_hover"]),
-                          ("disabled", COLORS["border"])],
-              foreground=[("disabled", COLORS["fg_dim"])])
+                          ("disabled", COLORS["bg_secondary"])],
+              foreground=[("disabled", COLORS["border"])])
 
     style.configure("Accent.TButton", background=COLORS["accent"],
                      foreground=COLORS["button_fg"], font=FONTS["button"],
@@ -154,10 +154,10 @@ def configure_theme(root):
 
     # ── Scrollbar ──
     style.configure("Vertical.TScrollbar",
-                     background=COLORS["border"],
+                     background=COLORS["fg_dim"],
                      troughcolor=COLORS["bg_secondary"],
-                     borderwidth=0, arrowsize=0)
+                     borderwidth=0, arrowsize=0, width=10)
     style.map("Vertical.TScrollbar",
-              background=[("active", COLORS["fg_dim"])])
+              background=[("active", COLORS["fg"])])
 
     return style

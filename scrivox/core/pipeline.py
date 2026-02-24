@@ -54,6 +54,14 @@ class PipelineConfig:
     output_path: Optional[str] = None
     subtitle_speakers: bool = False
 
+    # Subtitle tuning
+    subtitle_max_chars: int = 84
+    subtitle_max_duration: float = 4.0
+    subtitle_max_gap: float = 0.8
+
+    # Post-processing tuning
+    confidence_threshold: float = 0.50
+
     # LLM API
     api_base: Optional[str] = None
 
@@ -169,7 +177,8 @@ class TranscriptionPipeline:
         if cfg.diarize and not hf_token and not has_bundled:
             raise PipelineError("Diarization requires HF_TOKEN in .env, config, or huggingface-cli login")
 
-        if (cfg.vision or cfg.summarize) and not openrouter_key:
+        is_local = cfg.api_base and "localhost" in cfg.api_base
+        if (cfg.vision or cfg.summarize) and not openrouter_key and not is_local:
             raise PipelineError("Vision/Summary requires an LLM API key in .env or config")
 
         # Check video for vision
@@ -272,7 +281,8 @@ class TranscriptionPipeline:
             detected_lang = cfg.language or info.language
 
             before_count = len(segments)
-            segments = clean_transcription(segments, language=detected_lang)
+            segments = clean_transcription(segments, language=detected_lang,
+                                           confidence_threshold=cfg.confidence_threshold)
             removed = before_count - len(segments)
             if removed > 0:
                 self.on_progress(f"Post-processing: removed {removed} hallucinated/non-speech segments")
@@ -396,6 +406,9 @@ class TranscriptionPipeline:
             summary=summary,
             metadata=metadata,
             subtitle_speakers=cfg.subtitle_speakers,
+            subtitle_max_chars=cfg.subtitle_max_chars,
+            subtitle_max_duration=cfg.subtitle_max_duration,
+            subtitle_max_gap=cfg.subtitle_max_gap,
         )
 
         total_elapsed = time.time() - total_t0
