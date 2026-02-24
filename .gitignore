@@ -18,6 +18,10 @@ build/
 # Temp files
 whisper_frames_*/
 *.tmp
+*.log
+
+# CUDA flag
+use_system_cuda
 
 # Config (user-specific)
 scrivox_config.json

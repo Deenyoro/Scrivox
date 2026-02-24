@@ -181,14 +181,16 @@ def format_output(segments, fmt="txt", diarized=False, visual_context=None,
         return "\n".join(lines).strip()
 
     elif fmt == "srt":
-        # Merge segments into proper subtitle blocks
-        merged = _merge_subtitle_segments(segments)
+        # Sort segments by start time and merge into proper subtitle blocks
+        sorted_segs = sorted(segments, key=lambda x: x["start"])
+        merged = _merge_subtitle_segments(sorted_segs)
         for i, seg in enumerate(merged, 1):
             start_ts = format_timestamp(seg["start"], "srt")
             end_ts = format_timestamp(seg["end"], "srt")
-            text = _wrap_subtitle_text(seg["text"])
             if subtitle_speakers and diarized and seg.get("speaker"):
-                text = f"[{seg['speaker']}]\n{text}"
+                text = _wrap_subtitle_text(f"[{seg['speaker']}] {seg['text']}")
+            else:
+                text = _wrap_subtitle_text(seg["text"])
             lines.append(f"{i}")
             lines.append(f"{start_ts} --> {end_ts}")
             lines.append(text)
@@ -196,16 +198,18 @@ def format_output(segments, fmt="txt", diarized=False, visual_context=None,
         return "\n".join(lines)
 
     elif fmt == "vtt":
-        lines.append("WEBVTT\n")
+        lines.append("WEBVTT")
+        lines.append("")
         primary_lang = (metadata or {}).get("detected_language", "")
-        merged = _merge_subtitle_segments(segments)
+        sorted_segs = sorted(segments, key=lambda x: x["start"])
+        merged = _merge_subtitle_segments(sorted_segs)
         for seg in merged:
             start_ts = format_timestamp(seg["start"], "vtt")
             end_ts = format_timestamp(seg["end"], "vtt")
             text = _wrap_subtitle_text(seg["text"])
             seg_lang = seg.get("language", "")
             if seg_lang and seg_lang != primary_lang:
-                text = f"<lang {seg_lang}>{text}"
+                text = f"<lang {seg_lang}>{text}</lang>"
             if subtitle_speakers and diarized and seg.get("speaker"):
                 text = f"<v {seg['speaker']}>{text}"
             lines.append(f"{start_ts} --> {end_ts}")
@@ -234,7 +238,8 @@ def format_output(segments, fmt="txt", diarized=False, visual_context=None,
             row = f"{seg['start']:.3f}\t{seg['end']:.3f}"
             if diarized:
                 row += f"\t{seg.get('speaker', '')}"
-            row += f"\t{seg.get('language', '')}\t{seg['text']}"
+            seg_text = seg['text'].replace('\t', '\\t').replace('\n', ' ')
+            row += f"\t{seg.get('language', '')}\t{seg_text}"
             lines.append(row)
         return "\n".join(lines)
 

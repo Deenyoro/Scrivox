@@ -3,7 +3,7 @@
 import os
 import subprocess
 import tkinter as tk
-from tkinter import ttk, filedialog
+from tkinter import ttk, filedialog, messagebox
 
 from ..theme import COLORS, FONTS
 
@@ -14,6 +14,7 @@ class ResultsFrame(ttk.LabelFrame):
     def __init__(self, parent, **kwargs):
         super().__init__(parent, text="RESULTS", **kwargs)
         self._output_path = None
+        self._full_text = ""
         self._build()
 
     def _build(self):
@@ -56,6 +57,7 @@ class ResultsFrame(ttk.LabelFrame):
     def show_result(self, text, output_path=None):
         """Display result text and enable buttons."""
         self._output_path = output_path
+        self._full_text = text
         self.text_widget.configure(state=tk.NORMAL)
         self.text_widget.delete("1.0", tk.END)
         # Show first 5000 chars to avoid UI lag on huge transcripts
@@ -76,13 +78,12 @@ class ResultsFrame(ttk.LabelFrame):
         self.text_widget.delete("1.0", tk.END)
         self.text_widget.configure(state=tk.DISABLED)
         self._output_path = None
+        self._full_text = ""
         self._open_btn.configure(state=tk.DISABLED)
 
     def _copy(self):
         """Copy full text to clipboard with visual feedback."""
-        self.text_widget.configure(state=tk.NORMAL)
-        text = self.text_widget.get("1.0", tk.END).strip()
-        self.text_widget.configure(state=tk.DISABLED)
+        text = self._full_text
         if text:
             self.clipboard_clear()
             self.clipboard_append(text)
@@ -103,11 +104,11 @@ class ResultsFrame(ttk.LabelFrame):
             ],
         )
         if path:
-            self.text_widget.configure(state=tk.NORMAL)
-            text = self.text_widget.get("1.0", tk.END).strip()
-            self.text_widget.configure(state=tk.DISABLED)
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(text)
+            try:
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(self._full_text)
+            except Exception as e:
+                messagebox.showerror("Save Error", f"Could not save file:\n{e}")
 
     def _open_folder(self):
         """Open the folder containing the output file."""

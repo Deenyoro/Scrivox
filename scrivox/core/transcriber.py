@@ -213,7 +213,9 @@ def _capitalize_text(text):
     text = text[0].upper() + text[1:]
     text = re.sub(r'([.!?])\s+([a-z])', lambda m: m.group(1) + ' ' + m.group(2).upper(), text)
     text = re.sub(r"\bi\b", "I", text)
-    for acronym in ("ai", "hr", "api", "pto", "sso", "saas", "usa", "uk", "eu"):
+    for acronym in ("ai", "hr", "api", "pto", "sso", "saas", "usa", "uk", "eu",
+                     "ceo", "cto", "cfo", "coo", "vp", "qa", "kpi", "roi", "it",
+                     "pr", "ml", "sql", "url", "pdf", "faq", "gdpr", "eta", "asap", "rsvp"):
         text = re.sub(r'\b' + acronym + r'\b', acronym.upper(), text, flags=re.IGNORECASE)
     return text
 
@@ -239,7 +241,7 @@ def clean_transcription(segments, language=None):
 
         # Only strip non-Latin characters for Latin-script languages
         if _is_latin_language(seg_lang):
-            text = re.sub(r'[^\x00-\x7F\u00C0-\u024F\u2018\u2019\u201C\u201D\u2014\u2013]+', '', text)
+            text = re.sub(r'[^\x00-\x7F\u00C0-\u024F\u2018\u2019\u201C\u201D\u2014\u2013\u20AC\u00A3\u00A5\u20A9\u00B0\u00B1\u00A7\u00A9\u00AE\u2122\u00B7\u2022%]+', '', text)
 
         text = _normalize_punctuation(text)
 

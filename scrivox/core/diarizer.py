@@ -93,7 +93,7 @@ def diarize_audio(audio_path, hf_token, num_speakers=None, min_speakers=None,
         def progress_ticker():
             while not stop_progress.is_set():
                 elapsed = time.time() - t0
-                on_progress(f"\r  Diarizing... {elapsed:.0f}s elapsed")
+                on_progress(f"  Diarizing... {elapsed:.0f}s elapsed")
                 stop_progress.wait(5)
 
         ticker = threading.Thread(target=progress_ticker, daemon=True)
