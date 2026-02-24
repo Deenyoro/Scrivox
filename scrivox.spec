@@ -118,7 +118,7 @@ a = Analysis(
     hiddenimports=all_hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=['rthook_cuda.py'],
     excludes=[
         'IPython', 'pytest',
         'tkinter.test',
