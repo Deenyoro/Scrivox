@@ -51,6 +51,9 @@ class SettingsFrame(ttk.Frame):
         self.vision_var = tk.BooleanVar(value=False)
         self.summarize_var = tk.BooleanVar(value=False)
 
+        # Hardware
+        self.use_system_cuda_var = tk.BooleanVar(value=False)
+
         # Diarization sub-settings
         self.num_speakers_var = tk.StringVar(value="")
         self.min_speakers_var = tk.StringVar(value="")
@@ -95,6 +98,21 @@ class SettingsFrame(ttk.Frame):
         ttk.Label(model_frame, text="Presets or custom model name/path",
                   style="Dim.TLabel").pack(padx=8, pady=(0, 2), anchor=tk.W)
         ttk.Label(model_frame, text="Primary language, blank for auto-detect (e.g. ko, ja, en)",
+                  style="Dim.TLabel").pack(padx=8, pady=(0, 6), anchor=tk.W)
+
+        # ── HARDWARE ──
+        hw_frame = ttk.LabelFrame(self, text="HARDWARE")
+        hw_frame.pack(fill=tk.X, padx=4, pady=(0, 6))
+
+        cb_cuda = ttk.Checkbutton(hw_frame, text="Use system CUDA instead of bundled",
+                                   variable=self.use_system_cuda_var)
+        cb_cuda.pack(padx=8, pady=(8, 2), anchor=tk.W)
+        ToolTip(cb_cuda, "Use the NVIDIA CUDA Toolkit installed on your\n"
+                         "system instead of the bundled CUDA libraries.\n"
+                         "Enable this if you have a compatible CUDA\n"
+                         "installation and want to use it for better\n"
+                         "compatibility or newer driver features.")
+        ttk.Label(hw_frame, text="Uses NVIDIA CUDA Toolkit from your system. Requires restart.",
                   style="Dim.TLabel").pack(padx=8, pady=(0, 6), anchor=tk.W)
 
         # ── FEATURES ──
@@ -329,6 +347,7 @@ class SettingsFrame(ttk.Frame):
         """Load settings dict into widget variables."""
         self.model_var.set(settings.get("model", "large-v3"))
         self.language_var.set(settings.get("language", ""))
+        self.use_system_cuda_var.set(settings.get("use_system_cuda", False))
 
         # Only load advanced feature states if they're available
         if has_diarization():
@@ -367,6 +386,7 @@ class SettingsFrame(ttk.Frame):
         return {
             "model": self.model_var.get(),
             "language": self.language_var.get(),
+            "use_system_cuda": self.use_system_cuda_var.get(),
             "diarize": self.diarize_var.get(),
             "vision": self.vision_var.get(),
             "summarize": self.summarize_var.get(),

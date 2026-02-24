@@ -209,13 +209,23 @@ class ScrivoxApp(tk.Tk):
         """Check ffmpeg and GPU availability on startup, update status bar."""
         parts = []
 
+        # Determine CUDA source label
+        if getattr(sys, "frozen", False):
+            _flag = os.path.join(sys._MEIPASS, '..', 'use_system_cuda')
+        else:
+            _flag = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(
+                    os.path.abspath(__file__)))),
+                'use_system_cuda')
+        cuda_source = "system" if os.path.isfile(_flag) else "bundled"
+
         # GPU check
         try:
             import torch
             if torch.cuda.is_available():
                 gpu_name = torch.cuda.get_device_name(0)
                 cuda_ver = torch.version.cuda or "unknown"
-                parts.append(f"GPU: {gpu_name} | CUDA {cuda_ver}")
+                parts.append(f"GPU: {gpu_name} | CUDA {cuda_ver} ({cuda_source})")
             else:
                 parts.append("GPU: No CUDA device found")
         except Exception:
@@ -264,6 +274,24 @@ class ScrivoxApp(tk.Tk):
         except Exception:
             pass
         self.config_manager.save()
+
+        # Write or delete the use_system_cuda flag file
+        if getattr(sys, "frozen", False):
+            flag_path = os.path.join(sys._MEIPASS, '..', 'use_system_cuda')
+        else:
+            flag_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(
+                    os.path.abspath(__file__)))),
+                'use_system_cuda')
+        try:
+            if self.settings_frame.use_system_cuda_var.get():
+                with open(flag_path, 'w') as f:
+                    pass  # empty flag file
+            else:
+                if os.path.isfile(flag_path):
+                    os.remove(flag_path)
+        except OSError:
+            pass
 
     def _validate(self):
         """Validate inputs before starting pipeline."""

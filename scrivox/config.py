@@ -54,6 +54,7 @@ _DEFAULT_CONFIG = {
         "vision_workers": 4,
         "summary_model": "google/gemini-2.5-flash",
         "diarization_model": "pyannote/speaker-diarization-3.1",
+        "use_system_cuda": False,
     },
     "api": {
         "provider": "OpenRouter",

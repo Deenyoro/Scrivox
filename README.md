@@ -17,6 +17,8 @@ GPU-accelerated transcription suite with speaker diarization, SRT subtitle gener
 - **Multiple LLM Providers** — OpenRouter, OpenAI, Ollama, or any OpenAI-compatible endpoint
 - **6 Output Formats** — txt, md, srt, vtt, json, tsv
 - **GUI + CLI** — Tkinter desktop app or full command-line interface
+- **Multi-Track Audio** — select specific audio tracks from multi-track video files
+- **Batch Processing** — queue multiple files with drag-and-drop
 - **Portable Config** — JSON config stored next to the executable
 
 ## Quick Start
@@ -74,12 +76,13 @@ python dictate.py
 3. Copy `.env.example` to `.env` and add your API keys
 4. Run `Scrivox.exe`
 
-Two variants are available:
+Three variants are available:
 
-| Variant | Description |
-|---------|-------------|
-| **Scrivox-Full** | Diarization models pre-bundled, works immediately |
-| **Scrivox-Lite** | Smaller download, provide your own HuggingFace token |
+| Variant | Size | Description |
+|---------|------|-------------|
+| **Scrivox-Lite** | ~200-300 MB | Transcription only, no diarization |
+| **Scrivox-Regular** | ~500-800 MB | All features, provide your own HuggingFace token |
+| **Scrivox-Full** | ~1.5-2 GB | All features with diarization models pre-bundled |
 
 ### From Source
 
@@ -166,6 +169,9 @@ Options:
   --api-key KEY           LLM API key for vision/summary
   --hf-token TOKEN        HuggingFace token (Lite variant diarization)
 
+  --list-tracks           List audio tracks in the input file
+  --audio-track N         Select audio track index (default: 0)
+
   --all                   Enable diarize + vision + summarize
   --clear-cache           Force re-transcription
 ```
@@ -210,8 +216,8 @@ scrivox/
     theme.py               Dark theme configuration
     log_redirect.py        Thread-safe stdout -> log widget
     frames/
-      input_frame.py       File selection + media info
-      settings_frame.py    Model, language, feature toggles
+      queue_frame.py       Job queue + multi-file browse + drag-and-drop
+      settings_frame.py    Model, language, hardware, feature toggles
       api_frame.py         Provider selection + API key management
       output_frame.py      Format + output path
       progress_frame.py    Progress bar + elapsed timer
