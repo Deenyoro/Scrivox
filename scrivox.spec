@@ -150,9 +150,14 @@ exe = EXE(
     icon=icon_file,
 )
 
+# Exclude CUDA driver DLL — must come from the user's NVIDIA driver, not bundled.
+# Bundling it causes "forward compatibility was attempted on non-supported HW" errors.
+_excluded_dlls = {'nvcuda.dll'}
+_filtered_binaries = [b for b in a.binaries if os.path.basename(b[0]).lower() not in _excluded_dlls]
+
 coll = COLLECT(
     exe,
-    a.binaries,
+    _filtered_binaries,
     a.zipfiles,
     a.datas,
     strip=False,
