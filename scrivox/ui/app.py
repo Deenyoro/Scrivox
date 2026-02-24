@@ -301,7 +301,7 @@ class ScrivoxApp(tk.Tk):
                     os.path.abspath(__file__)))),
                 'use_system_cuda')
         try:
-            if self.settings_frame.use_system_cuda_var.get():
+            if self.models_frame.use_system_cuda_var.get():
                 with open(flag_path, 'w') as f:
                     pass  # empty flag file
             else:
@@ -384,6 +384,7 @@ class ScrivoxApp(tk.Tk):
             subtitle_max_chars=adv.get("subtitle_max_chars", 84),
             subtitle_max_duration=adv.get("subtitle_max_duration", 4.0),
             subtitle_max_gap=adv.get("subtitle_max_gap", 0.8),
+            subtitle_min_chars=adv.get("subtitle_min_chars", 15),
             confidence_threshold=adv.get("confidence_threshold", 0.50),
             api_base=(self.api_frame.get_api_base() if self.api_frame else None),
             hf_token=(self.api_frame.get_hf_token() if self.api_frame else None),

@@ -58,6 +58,7 @@ _DEFAULT_CONFIG = {
         "subtitle_max_chars": 84,
         "subtitle_max_duration": 4.0,
         "subtitle_max_gap": 0.8,
+        "subtitle_min_chars": 15,
         "confidence_threshold": 0.50,
     },
     "api": {

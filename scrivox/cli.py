@@ -103,6 +103,8 @@ def build_parser():
                               help="Max seconds per subtitle cue (default: 4.0)")
     output_group.add_argument("--subtitle-max-gap", type=float, default=0.8,
                               help="Max gap in seconds to merge across (default: 0.8)")
+    output_group.add_argument("--subtitle-min-chars", type=int, default=15,
+                              help="Min characters per cue when splitting (default: 15)")
     output_group.add_argument("--confidence-threshold", type=float, default=0.50,
                               help="Min avg word probability to keep a segment (default: 0.50)")
 
@@ -235,6 +237,7 @@ def run_cli(argv=None):
         subtitle_max_chars=args.subtitle_max_chars,
         subtitle_max_duration=args.subtitle_max_duration,
         subtitle_max_gap=args.subtitle_max_gap,
+        subtitle_min_chars=args.subtitle_min_chars,
         confidence_threshold=args.confidence_threshold,
         api_base=args.api_base,
         hf_token=args.hf_token,

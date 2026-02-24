@@ -22,6 +22,7 @@ class ModelsFrame(ttk.LabelFrame):
         self.subtitle_max_chars_var = tk.StringVar(value="84")
         self.subtitle_max_duration_var = tk.StringVar(value="4.0")
         self.subtitle_max_gap_var = tk.StringVar(value="0.8")
+        self.subtitle_min_chars_var = tk.StringVar(value="15")
 
         # Post-processing
         self.confidence_threshold_var = tk.StringVar(value="0.50")
@@ -80,7 +81,14 @@ class ModelsFrame(ttk.LabelFrame):
         e.pack(side=tk.RIGHT)
         ToolTip(e, "Max silence gap to merge across\nLower = more subtitle breaks at pauses")
 
-        ttk.Label(self._content, text="Controls how Whisper segments merge into subtitle cues",
+        row = ttk.Frame(self._content)
+        row.pack(fill=tk.X, padx=8, pady=2)
+        ttk.Label(row, text="Min chars/split:").pack(side=tk.LEFT)
+        e = ttk.Entry(row, textvariable=self.subtitle_min_chars_var, width=6)
+        e.pack(side=tk.RIGHT)
+        ToolTip(e, "Minimum characters per cue when splitting\nPrevents tiny one-word subtitle fragments")
+
+        ttk.Label(self._content, text="Controls how Whisper segments split and merge into subtitle cues",
                   style="Dim.TLabel").pack(padx=8, pady=(0, 6), anchor=tk.W)
 
         # ── Post-processing ──
@@ -96,6 +104,22 @@ class ModelsFrame(ttk.LabelFrame):
         ToolTip(e, "Min avg word probability to keep a segment\n0.50 = default, lower keeps more, higher filters more")
 
         ttk.Label(self._content, text="Segments below this confidence are removed as hallucinations",
+                  style="Dim.TLabel").pack(padx=8, pady=(0, 6), anchor=tk.W)
+
+        # ── Hardware ──
+        ttk.Separator(self._content, orient=tk.HORIZONTAL).pack(fill=tk.X, padx=8, pady=2)
+        ttk.Label(self._content, text="Hardware", style="Header.TLabel").pack(
+            padx=8, pady=(4, 2), anchor=tk.W)
+
+        self.use_system_cuda_var = tk.BooleanVar(value=False)
+        cb_cuda = ttk.Checkbutton(self._content, text="Use system CUDA instead of bundled",
+                                   variable=self.use_system_cuda_var)
+        cb_cuda.pack(padx=8, pady=(2, 2), anchor=tk.W)
+        ToolTip(cb_cuda, "Use the NVIDIA CUDA Toolkit installed on your\n"
+                         "system instead of the bundled CUDA libraries.\n"
+                         "Requires application restart to take effect.")
+
+        ttk.Label(self._content, text="Only change if you have a compatible system CUDA installation",
                   style="Dim.TLabel").pack(padx=8, pady=(0, 8), anchor=tk.W)
 
     def _toggle(self):
@@ -114,7 +138,9 @@ class ModelsFrame(ttk.LabelFrame):
         self.subtitle_max_chars_var.set(str(settings.get("subtitle_max_chars", 84)))
         self.subtitle_max_duration_var.set(str(settings.get("subtitle_max_duration", 4.0)))
         self.subtitle_max_gap_var.set(str(settings.get("subtitle_max_gap", 0.8)))
+        self.subtitle_min_chars_var.set(str(settings.get("subtitle_min_chars", 15)))
         self.confidence_threshold_var.set(str(settings.get("confidence_threshold", 0.50)))
+        self.use_system_cuda_var.set(settings.get("use_system_cuda", False))
 
     def get_settings_dict(self):
         """Return settings as a dict for config persistence."""
@@ -123,7 +149,9 @@ class ModelsFrame(ttk.LabelFrame):
             "subtitle_max_chars": self._parse_int(self.subtitle_max_chars_var.get(), 84),
             "subtitle_max_duration": self._parse_float(self.subtitle_max_duration_var.get(), 4.0),
             "subtitle_max_gap": self._parse_float(self.subtitle_max_gap_var.get(), 0.8),
+            "subtitle_min_chars": self._parse_int(self.subtitle_min_chars_var.get(), 15),
             "confidence_threshold": self._parse_float(self.confidence_threshold_var.get(), 0.50),
+            "use_system_cuda": self.use_system_cuda_var.get(),
         }
 
     def _parse_int(self, val, default):

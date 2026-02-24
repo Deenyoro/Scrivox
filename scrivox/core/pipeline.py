@@ -58,6 +58,7 @@ class PipelineConfig:
     subtitle_max_chars: int = 84
     subtitle_max_duration: float = 4.0
     subtitle_max_gap: float = 0.8
+    subtitle_min_chars: int = 15
 
     # Post-processing tuning
     confidence_threshold: float = 0.50
@@ -409,6 +410,7 @@ class TranscriptionPipeline:
             subtitle_max_chars=cfg.subtitle_max_chars,
             subtitle_max_duration=cfg.subtitle_max_duration,
             subtitle_max_gap=cfg.subtitle_max_gap,
+            subtitle_min_chars=cfg.subtitle_min_chars,
         )
 
         total_elapsed = time.time() - total_t0
