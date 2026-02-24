@@ -211,7 +211,7 @@ def format_output(segments, fmt="txt", diarized=False, visual_context=None,
             if seg_lang and seg_lang != primary_lang:
                 text = f"<lang {seg_lang}>{text}</lang>"
             if subtitle_speakers and diarized and seg.get("speaker"):
-                text = f"<v {seg['speaker']}>{text}"
+                text = f"<v {seg['speaker']}>{text}</v>"
             lines.append(f"{start_ts} --> {end_ts}")
             lines.append(text)
             lines.append("")

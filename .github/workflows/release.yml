@@ -115,15 +115,18 @@ jobs:
           body: |
             ## Scrivox ${{ steps.tag.outputs.TAG }}
 
-            GPU-accelerated transcription with speaker diarization, SRT subtitles, vision analysis, and meeting summarization.
+            GPU-accelerated transcription suite for Windows with NVIDIA CUDA. Transcribe audio/video, identify speakers with diarization, generate subtitles with speaker labels, analyze video keyframes, and summarize meetings.
+
+            **Output formats:** txt, md, srt, vtt, json, tsv
+            **Subtitles:** SRT and VTT with optional speaker labels (e.g. `[Alice] Hello` in SRT, `<v Alice>` voice tags in VTT)
 
             ### Downloads
 
-            | Variant | Size | Features |
-            |---------|------|----------|
-            | **Scrivox-Lite** | ~200-300 MB | Transcription only |
-            | **Scrivox** | ~500-800 MB | All features, provide own HF token |
-            | **Scrivox-Full** | ~1.5-2 GB | All features + bundled models |
+            | Variant | Size | What's included |
+            |---------|------|-----------------|
+            | **Scrivox-Lite** | ~200-300 MB | Transcription only. No diarization, vision, or summary. |
+            | **Scrivox** (Regular) | ~500-800 MB | All features (diarization, vision, summary). Downloads diarization models on first run — requires HuggingFace token. |
+            | **Scrivox-Full** | ~1.5-2 GB | All features with pre-bundled diarization models. No HuggingFace token needed for diarization. |
 
             ### Installation
             1. Download and extract the `.7z` archive
@@ -135,8 +138,8 @@ jobs:
             - NVIDIA GPU with CUDA support
 
             ### API Keys (add to .env or enter in GUI)
-            - **HF_TOKEN** — Required for diarization in Lite/Regular variants ([get one](https://huggingface.co/settings/tokens))
-            - **OPENROUTER_API_KEY** — Required for vision/summary features ([get one](https://openrouter.ai/keys))
+            - **HF_TOKEN** — Required for diarization in Regular variant ([get one](https://huggingface.co/settings/tokens)). Not needed for Full (models bundled) or Lite (no diarization).
+            - **OPENROUTER_API_KEY** — Required for vision analysis and meeting summary ([get one](https://openrouter.ai/keys))
           files: |
             Scrivox-Lite-${{ steps.tag.outputs.TAG }}-win64.7z
             Scrivox-${{ steps.tag.outputs.TAG }}-win64.7z

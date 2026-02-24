@@ -96,35 +96,65 @@ class ScrivoxApp(tk.Tk):
         ttk.Label(title_frame, text=version_text,
                   style="Dim.TLabel").pack(side=tk.LEFT, padx=(6, 0), pady=(4, 0))
 
-        # ── Main paned window ──
-        paned = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
-        paned.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
+        # ── Main container ──
+        main_frame = ttk.Frame(self)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
 
-        # ── Left panel: Settings ──
-        left_panel = ttk.Frame(paned)
-        paned.add(left_panel, weight=1)
+        # ── Left panel: Settings (fixed width, scrollable) ──
+        left_panel = ttk.Frame(main_frame, width=380)
+        left_panel.pack(side=tk.LEFT, fill=tk.Y)
+        left_panel.pack_propagate(False)
 
-        # Scrollable left panel
         left_canvas = tk.Canvas(left_panel, bg=COLORS["bg"], highlightthickness=0,
                                  borderwidth=0)
         left_scrollbar = ttk.Scrollbar(left_panel, orient=tk.VERTICAL,
                                         command=left_canvas.yview)
         self._left_inner = ttk.Frame(left_canvas)
+        self._left_canvas = left_canvas
 
-        self._left_inner.bind("<Configure>",
-                               lambda e: left_canvas.configure(scrollregion=left_canvas.bbox("all")))
-        left_canvas.create_window((0, 0), window=self._left_inner, anchor=tk.NW)
+        # Debounced scrollregion update
+        self._scroll_update_id = None
+
+        def _update_scrollregion(event=None):
+            if self._scroll_update_id:
+                left_canvas.after_cancel(self._scroll_update_id)
+            self._scroll_update_id = left_canvas.after(
+                16, lambda: left_canvas.configure(scrollregion=left_canvas.bbox("all")))
+
+        self._left_inner.bind("<Configure>", _update_scrollregion)
+
+        # Sync inner frame width to canvas width
+        def _on_canvas_configure(event):
+            left_canvas.itemconfigure(self._canvas_window, width=event.width)
+
+        self._canvas_window = left_canvas.create_window(
+            (0, 0), window=self._left_inner, anchor=tk.NW)
+        left_canvas.bind("<Configure>", _on_canvas_configure)
         left_canvas.configure(yscrollcommand=left_scrollbar.set)
 
         left_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         left_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # Bind mousewheel to left panel
+        # Scoped mousewheel — only scroll left panel when mouse is over it
+        self._mousewheel_bound = False
+
         def _on_mousewheel(event):
             left_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        left_canvas.bind_all("<MouseWheel>", _on_mousewheel, add="+")
 
-        # Queue frame (replaces InputFrame)
+        def _bind_mousewheel(event):
+            if not self._mousewheel_bound:
+                left_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+                self._mousewheel_bound = True
+
+        def _unbind_mousewheel(event):
+            if self._mousewheel_bound:
+                left_canvas.unbind_all("<MouseWheel>")
+                self._mousewheel_bound = False
+
+        left_canvas.bind("<Enter>", _bind_mousewheel)
+        left_canvas.bind("<Leave>", _unbind_mousewheel)
+
+        # Queue frame
         self.queue_frame = QueueFrame(
             self._left_inner, config_manager=self.config_manager,
             on_tracks_needed=self._show_track_dialog,
@@ -167,9 +197,13 @@ class ScrivoxApp(tk.Tk):
                                        command=self._cancel_pipeline, state=tk.DISABLED)
         self._cancel_btn.pack(fill=tk.X)
 
+        # ── Separator ──
+        ttk.Separator(main_frame, orient=tk.VERTICAL).pack(
+            side=tk.LEFT, fill=tk.Y, padx=4)
+
         # ── Right panel: Progress + Log + Results ──
-        right_panel = ttk.Frame(paned)
-        paned.add(right_panel, weight=2)
+        right_panel = ttk.Frame(main_frame)
+        right_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         # Progress
         self.progress_frame = ProgressFrame(right_panel)
@@ -186,17 +220,6 @@ class ScrivoxApp(tk.Tk):
         # ── Status bar ──
         self._status_bar = ttk.Label(self, text="", style="Dim.TLabel", anchor=tk.W)
         self._status_bar.pack(fill=tk.X, padx=12, pady=(0, 4))
-
-        # Set sash position
-        self.update_idletasks()
-        saved_sash = self.config_manager.get("ui", "sash_position")
-        if saved_sash:
-            try:
-                paned.sashpos(0, int(saved_sash))
-            except Exception:
-                pass
-
-        self._paned = paned
 
     def _setup_keyboard_shortcuts(self):
         """Bind keyboard shortcuts."""
@@ -269,10 +292,6 @@ class ScrivoxApp(tk.Tk):
         if self.api_frame:
             self.api_frame.save_to_config()
         self.config_manager.set("ui", "geometry", self.geometry())
-        try:
-            self.config_manager.set("ui", "sash_position", self._paned.sashpos(0))
-        except Exception:
-            pass
         self.config_manager.save()
 
         # Write or delete the use_system_cuda flag file
