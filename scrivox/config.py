@@ -37,6 +37,7 @@ _DEFAULT_CONFIG = {
     "credentials": {
         "hf_token": "",
         "openrouter_key": "",
+        "anthropic_key": "",
     },
     "last_settings": {
         "model": "large-v3",
@@ -60,6 +61,9 @@ _DEFAULT_CONFIG = {
         "subtitle_max_gap": 0.8,
         "subtitle_min_chars": 15,
         "confidence_threshold": 0.50,
+        "translate": False,
+        "translate_to": "",
+        "translation_model": "google/gemini-2.5-flash",
     },
     "api": {
         "provider": "OpenRouter",
@@ -126,16 +130,20 @@ class ConfigManager:
         return dict(self._data.get(section, {}))
 
     def get_credentials(self):
-        """Return (hf_token, openrouter_key) from config."""
+        """Return (hf_token, openrouter_key, anthropic_key) from config."""
         creds = self._data.get("credentials", {})
-        return creds.get("hf_token", ""), creds.get("openrouter_key", "")
+        return (creds.get("hf_token", ""),
+                creds.get("openrouter_key", ""),
+                creds.get("anthropic_key", ""))
 
-    def set_credentials(self, hf_token=None, openrouter_key=None):
+    def set_credentials(self, hf_token=None, openrouter_key=None, anthropic_key=None):
         """Update credential values."""
         if hf_token is not None:
             self.set("credentials", "hf_token", hf_token)
         if openrouter_key is not None:
             self.set("credentials", "openrouter_key", openrouter_key)
+        if anthropic_key is not None:
+            self.set("credentials", "anthropic_key", anthropic_key)
 
     def save_last_settings(self, **kwargs):
         """Save last-used pipeline settings."""

@@ -3,9 +3,31 @@
 import tkinter as tk
 from tkinter import ttk
 
-from ...core.constants import WHISPER_MODELS, DEFAULT_VISION_MODEL, DEFAULT_SUMMARY_MODEL
+from ...core.constants import (
+    DEFAULT_TRANSLATION_MODEL, DEFAULT_VISION_MODEL, DEFAULT_SUMMARY_MODEL,
+    WHISPER_LANGUAGES, WHISPER_MODELS,
+)
 from ...core.features import has_diarization, has_advanced_features
 from ..theme import COLORS, FONTS
+
+# Build display values for language dropdowns: ["", "Afrikaans (af)", "Arabic (ar)", ...]
+_LANGUAGE_DISPLAY_VALUES = [""] + [f"{name} ({code})" for name, code in WHISPER_LANGUAGES.items()]
+
+
+def _extract_language_code(display_str):
+    """Extract language code from display string like 'Arabic (ar)' -> 'ar'.
+
+    Also accepts raw codes like 'ar' or 'en' directly.
+    """
+    display_str = display_str.strip()
+    if not display_str:
+        return ""
+    # Try to extract from "Name (code)" format
+    if "(" in display_str and display_str.endswith(")"):
+        code = display_str.rsplit("(", 1)[1].rstrip(")")
+        return code.strip()
+    # Raw code (e.g. "en", "ar")
+    return display_str
 
 
 class ToolTip:
@@ -66,6 +88,11 @@ class SettingsFrame(ttk.Frame):
         # Summary sub-settings
         self.summary_model_var = tk.StringVar(value=DEFAULT_SUMMARY_MODEL)
 
+        # Translation sub-settings
+        self.translate_var = tk.BooleanVar(value=False)
+        self.translate_to_var = tk.StringVar(value="")
+        self.translation_model_var = tk.StringVar(value=DEFAULT_TRANSLATION_MODEL)
+
         self._build()
 
     def _build(self):
@@ -87,12 +114,13 @@ class SettingsFrame(ttk.Frame):
         row2 = ttk.Frame(model_frame)
         row2.pack(fill=tk.X, padx=8, pady=(0, 8))
         ttk.Label(row2, text="Language:").pack(side=tk.LEFT)
-        lang_entry = ttk.Entry(row2, textvariable=self.language_var, width=16)
-        lang_entry.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
-        ToolTip(lang_entry, "Leave blank for auto-detect\n"
-                            "Examples: en, ko, ja, de, fr")
+        lang_combo = ttk.Combobox(row2, textvariable=self.language_var,
+                                   values=_LANGUAGE_DISPLAY_VALUES, state="normal", width=20)
+        lang_combo.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
+        ToolTip(lang_combo, "Leave blank for auto-detect\n"
+                            "Select from list or type a language code")
 
-        ttk.Label(model_frame, text="Blank language = auto-detect. Custom model names accepted.",
+        ttk.Label(model_frame, text="Blank = auto-detect. Custom model names and language codes accepted.",
                   style="Dim.TLabel").pack(padx=8, pady=(0, 6), anchor=tk.W)
 
         # ── FEATURES ──
@@ -116,8 +144,15 @@ class SettingsFrame(ttk.Frame):
             cb_summary = ttk.Checkbutton(features_frame, text="Summarize (meeting summary)",
                                          variable=self.summarize_var,
                                          command=self._toggle_summary)
-            cb_summary.pack(padx=8, pady=(2, 8), anchor=tk.W)
+            cb_summary.pack(padx=8, pady=2, anchor=tk.W)
             ToolTip(cb_summary, "Generate meeting summary with key points\nRequires LLM API key")
+
+            cb_translate = ttk.Checkbutton(features_frame, text="Translate (LLM translation)",
+                                            variable=self.translate_var,
+                                            command=self._toggle_translate)
+            cb_translate.pack(padx=8, pady=(2, 8), anchor=tk.W)
+            ToolTip(cb_translate, "Translate transcript to another language\n"
+                                  "Produces a second output file\nRequires LLM API key")
 
         if not has_diarization():
             ttk.Label(features_frame,
@@ -208,6 +243,30 @@ class SettingsFrame(ttk.Frame):
         ttk.Label(row, text="Model:").pack(side=tk.LEFT)
         ttk.Entry(row, textvariable=self.summary_model_var).pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
 
+        # ── TRANSLATION SUB-SETTINGS ──
+        self._translate_frame = ttk.LabelFrame(self, text="TRANSLATION")
+
+        row = ttk.Frame(self._translate_frame)
+        row.pack(fill=tk.X, padx=8, pady=(8, 4))
+        ttk.Label(row, text="Target:").pack(side=tk.LEFT)
+        # Exclude blank entry for target — must pick a language
+        translate_langs = [f"{name} ({code})" for name, code in WHISPER_LANGUAGES.items()]
+        self._translate_to_combo = ttk.Combobox(
+            row, textvariable=self.translate_to_var,
+            values=translate_langs, state="normal", width=20)
+        self._translate_to_combo.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
+        ToolTip(self._translate_to_combo, "Target language for translation")
+
+        row = ttk.Frame(self._translate_frame)
+        row.pack(fill=tk.X, padx=8, pady=(2, 4))
+        ttk.Label(row, text="Model:").pack(side=tk.LEFT)
+        ttk.Entry(row, textvariable=self.translation_model_var).pack(
+            side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
+
+        ttk.Label(self._translate_frame,
+                  text="Produces a second output file with the translation",
+                  style="Dim.TLabel").pack(padx=8, pady=(0, 6), anchor=tk.W)
+
         # Initialize speaker mode display
         self._update_speaker_mode()
 
@@ -290,12 +349,31 @@ class SettingsFrame(ttk.Frame):
         else:
             self._summary_frame.pack_forget()
 
+    def _toggle_translate(self):
+        if self.translate_var.get():
+            # Insert after summary > vision > diarize > features
+            after = self._summary_frame if self.summarize_var.get() else (
+                self._vision_frame if self.vision_var.get() else (
+                    self._diarize_frame if self.diarize_var.get() else self._find_features_frame()
+                ))
+            self._translate_frame.pack(fill=tk.X, padx=4, pady=(0, 6), after=after)
+        else:
+            self._translate_frame.pack_forget()
+
     def _find_features_frame(self):
         """Find the FEATURES labelframe widget."""
         for child in self.winfo_children():
             if isinstance(child, ttk.LabelFrame) and child.cget("text") == "FEATURES":
                 return child
         return self
+
+    def get_language_code(self):
+        """Extract language code from the language combobox display value."""
+        return _extract_language_code(self.language_var.get()) or None
+
+    def get_translate_to_code(self):
+        """Extract language code from the translate-to combobox display value."""
+        return _extract_language_code(self.translate_to_var.get()) or None
 
     def get_speaker_names(self):
         """Parse and return speaker names list, or None."""
@@ -317,7 +395,16 @@ class SettingsFrame(ttk.Frame):
     def load_settings(self, settings):
         """Load settings dict into widget variables."""
         self.model_var.set(settings.get("model", "large-v3"))
-        self.language_var.set(settings.get("language", ""))
+
+        # Convert raw language code to display format if needed
+        lang_val = settings.get("language", "")
+        if lang_val and "(" not in lang_val:
+            # Raw code like "en" -> "English (en)"
+            from ...core.constants import LANGUAGE_CODE_TO_NAME
+            name = LANGUAGE_CODE_TO_NAME.get(lang_val)
+            if name:
+                lang_val = f"{name} ({lang_val})"
+        self.language_var.set(lang_val)
 
         # Only load advanced feature states if they're available
         if has_diarization():
@@ -325,12 +412,24 @@ class SettingsFrame(ttk.Frame):
         if has_advanced_features():
             self.vision_var.set(settings.get("vision", False))
             self.summarize_var.set(settings.get("summarize", False))
+            self.translate_var.set(settings.get("translate", False))
 
         self.speaker_names_var.set(settings.get("speaker_names", ""))
         self.vision_interval_var.set(str(settings.get("vision_interval", 60)))
         self.vision_model_var.set(settings.get("vision_model", DEFAULT_VISION_MODEL))
         self.vision_workers_var.set(str(settings.get("vision_workers", 4)))
         self.summary_model_var.set(settings.get("summary_model", DEFAULT_SUMMARY_MODEL))
+
+        # Translation settings
+        translate_to_val = settings.get("translate_to", "")
+        if translate_to_val and "(" not in translate_to_val:
+            from ...core.constants import LANGUAGE_CODE_TO_NAME
+            name = LANGUAGE_CODE_TO_NAME.get(translate_to_val)
+            if name:
+                translate_to_val = f"{name} ({translate_to_val})"
+        self.translate_to_var.set(translate_to_val)
+        self.translation_model_var.set(
+            settings.get("translation_model", DEFAULT_TRANSLATION_MODEL))
 
         num = settings.get("num_speakers")
         self.num_speakers_var.set(str(num) if num else "")
@@ -350,6 +449,7 @@ class SettingsFrame(ttk.Frame):
         self._toggle_diarize()
         self._toggle_vision()
         self._toggle_summary()
+        self._toggle_translate()
 
     def get_settings_dict(self):
         """Return current settings as a dict for config persistence."""
@@ -359,6 +459,9 @@ class SettingsFrame(ttk.Frame):
             "diarize": self.diarize_var.get(),
             "vision": self.vision_var.get(),
             "summarize": self.summarize_var.get(),
+            "translate": self.translate_var.get(),
+            "translate_to": self.translate_to_var.get(),
+            "translation_model": self.translation_model_var.get(),
             "num_speakers": self.get_int_or_none(self.num_speakers_var),
             "min_speakers": self.get_int_or_none(self.min_speakers_var),
             "max_speakers": self.get_int_or_none(self.max_speakers_var),

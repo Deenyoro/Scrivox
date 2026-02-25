@@ -19,6 +19,7 @@ class ApiFrame(ttk.LabelFrame):
 
         self.hf_token_var = tk.StringVar()
         self.openrouter_key_var = tk.StringVar()
+        self.anthropic_key_var = tk.StringVar()
         self.provider_var = tk.StringVar(value=DEFAULT_LLM_PROVIDER)
         self.custom_base_var = tk.StringVar()
         self._show_keys = False
@@ -52,12 +53,24 @@ class ApiFrame(ttk.LabelFrame):
         provider_combo.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
         provider_combo.bind("<<ComboboxSelected>>", self._on_provider_change)
 
-        # API Key
-        row = ttk.Frame(self)
-        row.pack(fill=tk.X, padx=8, pady=(0, 4))
-        ttk.Label(row, text="API Key:  ").pack(side=tk.LEFT)
-        self._or_entry = ttk.Entry(row, textvariable=self.openrouter_key_var, show="*")
+        # API Key (for OpenRouter/OpenAI/Ollama/Custom)
+        self._api_key_frame = ttk.Frame(self)
+        self._api_key_frame.pack(fill=tk.X, padx=8, pady=(0, 4))
+        ttk.Label(self._api_key_frame, text="API Key:  ").pack(side=tk.LEFT)
+        self._or_entry = ttk.Entry(self._api_key_frame, textvariable=self.openrouter_key_var, show="*")
         self._or_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 4))
+
+        # Anthropic API Key (shown when Anthropic selected)
+        self._anthropic_key_frame = ttk.Frame(self)
+        ttk.Label(self._anthropic_key_frame, text="API Key:  ").pack(side=tk.LEFT)
+        self._anthropic_entry = ttk.Entry(self._anthropic_key_frame,
+                                           textvariable=self.anthropic_key_var, show="*")
+        self._anthropic_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 4))
+
+        # Anthropic hint
+        self._anthropic_hint = ttk.Label(
+            self, text="Get your key at console.anthropic.com/settings/keys",
+            style="Dim.TLabel")
 
         # Custom base URL (hidden by default)
         self._custom_frame = ttk.Frame(self)
@@ -79,24 +92,43 @@ class ApiFrame(ttk.LabelFrame):
         self._status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
     def _on_provider_change(self, event=None):
-        if self.provider_var.get() == "Custom":
-            self._custom_frame.pack(fill=tk.X, padx=8, pady=(0, 4),
-                                     before=self._show_btn.master)
-        else:
+        provider = self.provider_var.get()
+
+        # Show/hide Anthropic key vs standard API key
+        if provider == "Anthropic":
+            self._api_key_frame.pack_forget()
+            self._anthropic_key_frame.pack(fill=tk.X, padx=8, pady=(0, 4),
+                                            before=self._show_btn.master)
+            self._anthropic_hint.pack(padx=8, pady=(0, 4), anchor=tk.W,
+                                       before=self._show_btn.master)
             self._custom_frame.pack_forget()
+        else:
+            self._anthropic_key_frame.pack_forget()
+            self._anthropic_hint.pack_forget()
+            self._api_key_frame.pack(fill=tk.X, padx=8, pady=(0, 4),
+                                      before=self._show_btn.master)
+            if provider == "Custom":
+                self._custom_frame.pack(fill=tk.X, padx=8, pady=(0, 4),
+                                         before=self._show_btn.master)
+            else:
+                self._custom_frame.pack_forget()
 
     def _load_from_config(self):
         """Load keys from config, falling back to env vars."""
         hf = ""
         or_key = ""
+        ant_key = ""
         if self.config_manager:
-            hf, or_key = self.config_manager.get_credentials()
+            hf, or_key, ant_key = self.config_manager.get_credentials()
         if not hf:
             hf = os.environ.get("HF_TOKEN", "")
         if not or_key:
             or_key = os.environ.get("OPENROUTER_API_KEY", "")
+        if not ant_key:
+            ant_key = os.environ.get("ANTHROPIC_API_KEY", "")
         self.hf_token_var.set(hf)
         self.openrouter_key_var.set(or_key)
+        self.anthropic_key_var.set(ant_key)
 
         # Load provider setting
         if self.config_manager:
@@ -111,6 +143,7 @@ class ApiFrame(ttk.LabelFrame):
         show_char = "" if self._show_keys else "*"
         self._hf_entry.configure(show=show_char)
         self._or_entry.configure(show=show_char)
+        self._anthropic_entry.configure(show=show_char)
         self._show_btn.configure(text="Hide" if self._show_keys else "Show")
 
     def _test_keys(self):
@@ -122,6 +155,8 @@ class ApiFrame(ttk.LabelFrame):
             results = []
             hf = self.hf_token_var.get().strip()
             or_key = self.openrouter_key_var.get().strip()
+            ant_key = self.anthropic_key_var.get().strip()
+            provider = self.provider_var.get()
 
             if hf:
                 try:
@@ -145,27 +180,60 @@ class ApiFrame(ttk.LabelFrame):
                 else:
                     results.append("HuggingFace: not set")
 
-            if or_key:
-                try:
-                    import requests
-                    base_url = self.get_api_base()
-                    # Test by sending a minimal request
-                    test_url = base_url.replace("/chat/completions", "/models")
-                    resp = requests.get(
-                        test_url,
-                        headers={"Authorization": f"Bearer {or_key}"},
-                        timeout=10,
-                    )
-                    if resp.status_code == 200:
-                        results.append("API: Valid")
-                    elif resp.status_code == 401:
-                        results.append("API: Invalid key (401)")
-                    else:
-                        results.append(f"API: Error ({resp.status_code})")
-                except Exception as e:
-                    results.append(f"API: {type(e).__name__}")
+            # Test the active provider's key
+            if provider == "Anthropic":
+                if ant_key:
+                    try:
+                        import requests
+                        # Test with a minimal messages request
+                        resp = requests.post(
+                            "https://api.anthropic.com/v1/messages",
+                            headers={
+                                "x-api-key": ant_key,
+                                "anthropic-version": "2023-06-01",
+                                "content-type": "application/json",
+                            },
+                            json={
+                                "model": "claude-haiku-4-5-20251001",
+                                "max_tokens": 1,
+                                "messages": [{"role": "user", "content": "Hi"}],
+                            },
+                            timeout=15,
+                        )
+                        if resp.status_code == 200:
+                            results.append("Anthropic: Valid")
+                        elif resp.status_code == 401:
+                            results.append("Anthropic: Invalid key (401)")
+                        elif resp.status_code == 403:
+                            results.append("Anthropic: Forbidden (403)")
+                        else:
+                            results.append(f"Anthropic: Error ({resp.status_code})")
+                    except Exception as e:
+                        results.append(f"Anthropic: {type(e).__name__}")
+                else:
+                    results.append("Anthropic: not set")
             else:
-                results.append("API: not set")
+                if or_key:
+                    try:
+                        import requests
+                        base_url = self.get_api_base()
+                        # Test by sending a minimal request
+                        test_url = base_url.replace("/chat/completions", "/models")
+                        resp = requests.get(
+                            test_url,
+                            headers={"Authorization": f"Bearer {or_key}"},
+                            timeout=10,
+                        )
+                        if resp.status_code == 200:
+                            results.append("API: Valid")
+                        elif resp.status_code == 401:
+                            results.append("API: Invalid key (401)")
+                        else:
+                            results.append(f"API: Error ({resp.status_code})")
+                    except Exception as e:
+                        results.append(f"API: {type(e).__name__}")
+                else:
+                    results.append("API: not set")
 
             status_text = " | ".join(results)
             all_ok = all("Valid" in r or "bundled" in r for r in results if "not set" not in r)
@@ -188,6 +256,7 @@ class ApiFrame(ttk.LabelFrame):
             self.config_manager.set_credentials(
                 hf_token=self.hf_token_var.get().strip(),
                 openrouter_key=self.openrouter_key_var.get().strip(),
+                anthropic_key=self.anthropic_key_var.get().strip(),
             )
             self.config_manager.set("api", "provider", self.provider_var.get())
             self.config_manager.set("api", "custom_base", self.custom_base_var.get().strip())
@@ -196,7 +265,14 @@ class ApiFrame(ttk.LabelFrame):
         return self.hf_token_var.get().strip()
 
     def get_openrouter_key(self):
+        """Get the active LLM API key for the selected provider."""
+        if self.provider_var.get() == "Anthropic":
+            return self.anthropic_key_var.get().strip()
         return self.openrouter_key_var.get().strip()
+
+    def get_anthropic_key(self):
+        """Get the Anthropic API key specifically."""
+        return self.anthropic_key_var.get().strip()
 
     def get_api_base(self):
         """Get the resolved API base URL for the selected provider."""

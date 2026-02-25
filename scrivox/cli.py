@@ -15,8 +15,8 @@ else:
 load_dotenv(os.path.join(_dotenv_base, ".env"))
 
 from .core.constants import (
-    DEFAULT_DIARIZATION_MODEL, DEFAULT_VISION_MODEL, DEFAULT_SUMMARY_MODEL,
-    OUTPUT_FORMATS,
+    DEFAULT_DIARIZATION_MODEL, DEFAULT_TRANSLATION_MODEL, DEFAULT_VISION_MODEL,
+    DEFAULT_SUMMARY_MODEL, OUTPUT_FORMATS,
 )
 from .core.features import has_diarization, has_advanced_features, get_variant_name
 from .core.pipeline import PipelineConfig, PipelineError, TranscriptionPipeline
@@ -81,6 +81,14 @@ def build_parser():
     summary_group.add_argument("--summary-model", default=DEFAULT_SUMMARY_MODEL,
                                help=f"LLM model for summary (default: {DEFAULT_SUMMARY_MODEL})")
 
+    # Translation options
+    translate_group = parser.add_argument_group("Translation")
+    translate_group.add_argument("--translate-to", default=None,
+                                 help="Translate transcript to target language code (e.g. 'ar', 'fr', 'ja'). "
+                                      "Produces a second output file with the translation.")
+    translate_group.add_argument("--translation-model", default=DEFAULT_TRANSLATION_MODEL,
+                                 help=f"LLM model for translation (default: {DEFAULT_TRANSLATION_MODEL})")
+
     # Multi-track options
     track_group = parser.add_argument_group("Audio Tracks")
     track_group.add_argument("--audio-track", type=int, default=0,
@@ -114,13 +122,17 @@ def build_parser():
     parser.add_argument("--hf-token", default=None,
                         help="HuggingFace token (overrides .env / cached login)")
     parser.add_argument("--api-key", default=None,
-                        help="LLM API key for vision/summary (overrides .env)")
+                        help="LLM API key for vision/summary/translation (overrides .env)")
     parser.add_argument("--openrouter-key", default=None,
                         help="Alias for --api-key (backward compat)")
+    parser.add_argument("--anthropic-key", default=None,
+                        help="Anthropic API key (uses Anthropic Messages API). "
+                             "Overrides --api-key and sets API base to Anthropic.")
     parser.add_argument("--api-base", default=None,
                         help="LLM API base URL (default: OpenRouter). "
                              "Examples: https://api.openai.com/v1/chat/completions, "
-                             "http://localhost:11434/v1/chat/completions")
+                             "http://localhost:11434/v1/chat/completions, "
+                             "https://api.anthropic.com/v1/messages")
 
     return parser
 
@@ -184,6 +196,10 @@ def run_cli(argv=None):
         print(f"Error: --summarize is not available in the {get_variant_name()} build. "
               "Use the Regular or Full build for meeting summaries.", file=sys.stderr)
         sys.exit(1)
+    if args.translate_to and not has_advanced_features():
+        print(f"Error: --translate-to is not available in the {get_variant_name()} build. "
+              "Use the Regular or Full build for translation.", file=sys.stderr)
+        sys.exit(1)
 
     # Validate input
     if not os.path.isfile(args.input):
@@ -213,8 +229,17 @@ def run_cli(argv=None):
     if args.speaker_names:
         speaker_names = [name.strip() for name in args.speaker_names.split(",") if name.strip()]
 
-    # Build config
+    # Build config — resolve API key and base URL
     api_key = args.api_key or args.openrouter_key
+    api_base = args.api_base
+
+    # --anthropic-key overrides: use Anthropic's Messages API
+    if args.anthropic_key:
+        api_key = args.anthropic_key
+        if not api_base:
+            from .core.constants import LLM_PROVIDERS
+            api_base = LLM_PROVIDERS["Anthropic"]
+
     config = PipelineConfig(
         input_path=args.input,
         model=args.model,
@@ -231,6 +256,9 @@ def run_cli(argv=None):
         vision_model=args.vision_model,
         vision_workers=args.vision_workers,
         summary_model=args.summary_model,
+        translate=bool(args.translate_to),
+        translate_to=args.translate_to,
+        translation_model=args.translation_model,
         output_format=args.format,
         output_path=args.output,
         subtitle_speakers=args.subtitle_speakers,
@@ -239,7 +267,7 @@ def run_cli(argv=None):
         subtitle_max_gap=args.subtitle_max_gap,
         subtitle_min_chars=args.subtitle_min_chars,
         confidence_threshold=args.confidence_threshold,
-        api_base=args.api_base,
+        api_base=api_base,
         hf_token=args.hf_token,
         openrouter_key=api_key,
         audio_track=args.audio_track,
@@ -253,6 +281,10 @@ def run_cli(argv=None):
     except PipelineError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
+
+    # Print translated output path
+    if result.translated_output_path:
+        print(f"Translation saved to: {result.translated_output_path}")
 
     # Print to console if no output file
     if not result.output_path:

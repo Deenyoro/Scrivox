@@ -334,17 +334,24 @@ class ScrivoxApp(tk.Tk):
                                      "Enter it in the API Keys section.")
                 return False
 
-        if settings.vision_var.get() or settings.summarize_var.get():
+        if settings.vision_var.get() or settings.summarize_var.get() or settings.translate_var.get():
             if not self.api_frame:
                 messagebox.showerror("Error",
-                                     "Vision/Summary features are not available in the Lite build.")
+                                     "Vision/Summary/Translation features are not available in the Lite build.")
                 return False
             # Ollama (local) doesn't require an API key
             is_local = "localhost" in (self.api_frame.get_api_base() or "")
             if not self.api_frame.get_openrouter_key() and not is_local:
                 messagebox.showerror("Error",
-                                     "Vision/Summary requires an LLM API key.\n"
+                                     "Vision/Summary/Translation requires an LLM API key.\n"
                                      "Enter it in the API Keys section.")
+                return False
+
+        if settings.translate_var.get():
+            if not settings.get_translate_to_code():
+                messagebox.showerror("Error",
+                                     "Translation is enabled but no target language selected.\n"
+                                     "Pick a target language in the Translation section.")
                 return False
 
         return True
@@ -356,7 +363,7 @@ class ScrivoxApp(tk.Tk):
         # Determine file path and audio track
         file_path = job.file_path if job else self.queue_frame.file_path
         audio_track = job.audio_track if job else 0
-        language = job.language_override if (job and job.language_override) else (s.language_var.get() or None)
+        language = job.language_override if (job and job.language_override) else s.get_language_code()
 
         # Get advanced settings from models frame
         adv = self.models_frame.get_settings_dict() if self.models_frame else {}
@@ -378,6 +385,9 @@ class ScrivoxApp(tk.Tk):
             vision_model=s.vision_model_var.get(),
             vision_workers=int(s.vision_workers_var.get() or 4),
             summary_model=s.summary_model_var.get(),
+            translate=s.translate_var.get(),
+            translate_to=s.get_translate_to_code(),
+            translation_model=s.translation_model_var.get(),
             output_format=self.output_frame.format_var.get(),
             output_path=self.output_frame.output_path_var.get() or None,
             subtitle_speakers=self.output_frame.subtitle_speakers_var.get(),
@@ -515,11 +525,15 @@ class ScrivoxApp(tk.Tk):
 
         if len(results) == 1:
             self.results_frame.show_result(last.output_text, last.output_path)
+            if last.translated_output_path:
+                self._on_progress(f"Translation saved to: {last.translated_output_path}")
         else:
             summary_lines = [f"Batch complete: {len(results)} job(s) finished\n"]
             for r in results:
                 path = r.output_path or "(console)"
                 summary_lines.append(f"  - {r.metadata.get('input_file', '?')} -> {path}")
+                if r.translated_output_path:
+                    summary_lines.append(f"    (translation: {r.translated_output_path})")
             summary_lines.append(f"\nTotal time: {total_elapsed:.1f}s")
             summary_text = "\n".join(summary_lines)
             self.results_frame.show_result(summary_text, last.output_path)

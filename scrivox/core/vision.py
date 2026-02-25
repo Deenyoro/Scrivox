@@ -1,27 +1,16 @@
-"""Vision / keyframe analysis using OpenRouter vision LLMs."""
+"""Vision / keyframe analysis using LLM vision models."""
 
 import base64
 import concurrent.futures
 import glob
-import json
 import os
 import subprocess
 import tempfile
 import time
 
-import requests
-
 from .formatter import format_timestamp_human
+from .llm_client import chat_completion
 from .media import get_media_duration
-
-
-def _safe_parse_api_response(resp):
-    """Safely extract text from an OpenRouter API response."""
-    try:
-        data = resp.json()
-        return data["choices"][0]["message"]["content"].strip()
-    except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
-        return f"[API parse error: {e}]"
 
 
 def extract_keyframes(video_path, interval_secs=60, max_frames=30, on_progress=print):
@@ -65,67 +54,46 @@ def describe_keyframe(image_path, timestamp, api_key, vision_model, api_base=Non
         img_b64 = base64.b64encode(f.read()).decode("utf-8")
 
     ts_str = format_timestamp_human(timestamp)
-    payload = {
-        "model": vision_model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": (
-                            f"This is a screenshot from a video at timestamp {ts_str}. "
-                            "Briefly describe what's visible on screen \u2014 any text, UI elements, "
-                            "people, slides, applications, or content shown. "
-                            "Be concise (2-3 sentences max). Focus on what would provide useful "
-                            "context alongside a transcript of the conversation."
-                        ),
+
+    # Build messages in OpenAI format — llm_client converts for Anthropic
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        f"This is a screenshot from a video at timestamp {ts_str}. "
+                        "Briefly describe what's visible on screen \u2014 any text, UI elements, "
+                        "people, slides, applications, or content shown. "
+                        "Be concise (2-3 sentences max). Focus on what would provide useful "
+                        "context alongside a transcript of the conversation."
+                    ),
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{img_b64}",
                     },
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{img_b64}",
-                        },
-                    },
-                ],
-            }
-        ],
-        "max_tokens": 200,
-    }
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
+                },
+            ],
+        }
+    ]
 
     from .constants import LLM_PROVIDERS, DEFAULT_LLM_PROVIDER
     url = api_base or LLM_PROVIDERS[DEFAULT_LLM_PROVIDER]
 
-    for attempt in range(max_retries):
-        try:
-            resp = requests.post(
-                url,
-                headers=headers, json=payload, timeout=60,
-            )
-            if resp.status_code == 200:
-                return _safe_parse_api_response(resp)
-            elif resp.status_code >= 500 or resp.status_code == 429:
-                wait = 2 ** attempt
-                on_progress(f"    (rate limited or server error {resp.status_code}, retrying in {wait}s...)")
-                time.sleep(wait)
-                continue
-            else:
-                body = ""
-                try:
-                    body = resp.text[:100]
-                except Exception:
-                    pass
-                return f"[Vision API error: {resp.status_code} - {body}]"
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, requests.exceptions.SSLError) as e:
-            if attempt < max_retries - 1:
-                on_progress(f"    (retry {attempt+1}/{max_retries} after {type(e).__name__})")
-                time.sleep(2 ** attempt)
-            else:
-                return f"[Vision error: {type(e).__name__}]"
-    return "[Vision error: max retries exceeded]"
+    result = chat_completion(
+        messages=messages,
+        model=vision_model,
+        api_key=api_key,
+        api_base=url,
+        max_tokens=200,
+        max_retries=max_retries,
+        timeout=60,
+    )
+
+    return result or "[Vision error: no response]"
 
 
 def analyze_keyframes(keyframes, api_key, vision_model, max_workers=4, api_base=None, on_progress=print):
@@ -148,7 +116,6 @@ def analyze_keyframes(keyframes, api_key, vision_model, max_workers=4, api_base=
                 idx, result = future.result()
                 descriptions[idx] = result
             except Exception as e:
-                import sys
                 frame_idx = futures[future]
                 ts_str = format_timestamp_human(keyframes[frame_idx]["timestamp"])
                 on_progress(f"  Frame {frame_idx+1} @ {ts_str} failed: {e}")

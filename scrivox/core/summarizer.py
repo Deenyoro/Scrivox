@@ -1,21 +1,9 @@
-"""Meeting summary generation via OpenRouter LLM."""
+"""Meeting summary generation via LLM API."""
 
-import json
-import sys
 import time
 
-import requests
-
 from .formatter import format_timestamp_human
-
-
-def _safe_parse_api_response(resp):
-    """Safely extract text from an OpenRouter API response."""
-    try:
-        data = resp.json()
-        return data["choices"][0]["message"]["content"].strip()
-    except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
-        return f"[API parse error: {e}]"
+from .llm_client import chat_completion
 
 
 def generate_meeting_summary(segments, api_key, summary_model, diarized=False,
@@ -74,44 +62,24 @@ A 2-4 sentence overview of what the meeting was about.
 
 Be concise and factual. Only include information actually present in the transcript."""
 
-    payload = {
-        "model": summary_model,
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 2000,
-    }
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-
     from .constants import LLM_PROVIDERS, DEFAULT_LLM_PROVIDER
     url = api_base or LLM_PROVIDERS[DEFAULT_LLM_PROVIDER]
 
-    for attempt in range(3):
-        try:
-            resp = requests.post(
-                url,
-                headers=headers, json=payload, timeout=120,
-            )
-            if resp.status_code == 200:
-                summary = _safe_parse_api_response(resp)
-                if summary.startswith("[API parse error"):
-                    on_progress(f"Warning: {summary}")
-                    return None
-                elapsed = time.time() - t0
-                on_progress(f"Summary generated in {elapsed:.1f}s")
-                return summary
-            elif resp.status_code >= 500 or resp.status_code == 429:
-                time.sleep(2 ** attempt)
-                continue
-            else:
-                on_progress(f"Warning: Summary API error {resp.status_code}: {resp.text[:200]}")
-                return None
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
-            if attempt < 2:
-                time.sleep(2 ** attempt)
-            else:
-                on_progress(f"Warning: Summary failed after retries: {type(e).__name__}")
-                return None
+    messages = [{"role": "user", "content": prompt}]
+    result = chat_completion(
+        messages=messages,
+        model=summary_model,
+        api_key=api_key,
+        api_base=url,
+        max_tokens=2000,
+        max_retries=3,
+        timeout=120,
+    )
 
-    on_progress("Warning: Summary generation failed after max retries")
-    return None
+    if result is None or result.startswith("["):
+        on_progress(f"Warning: Summary generation failed: {result}")
+        return None
+
+    elapsed = time.time() - t0
+    on_progress(f"Summary generated in {elapsed:.1f}s")
+    return result

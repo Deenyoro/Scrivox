@@ -12,13 +12,15 @@ import torch
 
 from .constants import (
     AUDIO_EXTENSIONS, DEFAULT_DIARIZATION_MODEL, DEFAULT_SUMMARY_MODEL,
-    DEFAULT_VISION_MODEL, VIDEO_EXTENSIONS,
+    DEFAULT_TRANSLATION_MODEL, DEFAULT_VISION_MODEL, LANGUAGE_CODE_TO_NAME,
+    VIDEO_EXTENSIONS,
 )
 from .media import check_ffmpeg, extract_wav, get_media_duration, has_video_stream
 from .transcriber import clean_transcription, transcribe_audio
 from .diarizer import assign_speakers, diarize_audio, rename_speakers, _get_bundled_models_dir
 from .vision import analyze_keyframes, extract_keyframes
 from .summarizer import generate_meeting_summary
+from .translator import translate_segments
 from .formatter import format_output, format_timestamp_human
 
 
@@ -33,6 +35,9 @@ class PipelineConfig:
     diarize: bool = False
     vision: bool = False
     summarize: bool = False
+    translate: bool = False
+    translate_to: Optional[str] = None  # target language code e.g. "ar"
+    translation_model: str = DEFAULT_TRANSLATION_MODEL
 
     # Diarization
     diarization_model: str = DEFAULT_DIARIZATION_MODEL
@@ -96,6 +101,9 @@ class PipelineResult:
     metadata: Optional[dict] = None
     output_text: str = ""
     output_path: Optional[str] = None
+    translated_segments: Optional[list] = None
+    translated_output_text: str = ""
+    translated_output_path: Optional[str] = None
     elapsed: float = 0.0
 
 
@@ -110,6 +118,7 @@ class TranscriptionPipeline:
     STEPS_DIARIZE = ["Diarize"]
     STEPS_VISION = ["Vision Analysis"]
     STEPS_SUMMARY = ["Meeting Summary"]
+    STEPS_TRANSLATE = ["Translate"]
     STEPS_OUTPUT = ["Format Output"]
 
     def __init__(self, config: PipelineConfig, on_progress: Callable = print,
@@ -140,6 +149,8 @@ class TranscriptionPipeline:
         if self.config.vision:
             steps += 1
         if self.config.summarize:
+            steps += 1
+        if self.config.translate:
             steps += 1
         steps += 1  # format output
         return steps
@@ -179,8 +190,8 @@ class TranscriptionPipeline:
             raise PipelineError("Diarization requires HF_TOKEN in .env, config, or huggingface-cli login")
 
         is_local = cfg.api_base and "localhost" in cfg.api_base
-        if (cfg.vision or cfg.summarize) and not openrouter_key and not is_local:
-            raise PipelineError("Vision/Summary requires an LLM API key in .env or config")
+        if (cfg.vision or cfg.summarize or cfg.translate) and not openrouter_key and not is_local:
+            raise PipelineError("Vision/Summary/Translation requires an LLM API key in .env or config")
 
         # Check video for vision
         is_video = has_video_stream(cfg.input_path)
@@ -197,6 +208,9 @@ class TranscriptionPipeline:
             self.on_progress("  + VISUAL CONTEXT (keyframe analysis)")
         if cfg.summarize:
             self.on_progress("  + MEETING SUMMARY")
+        if cfg.translate and cfg.translate_to:
+            target_name = LANGUAGE_CODE_TO_NAME.get(cfg.translate_to, cfg.translate_to)
+            self.on_progress(f"  + TRANSLATION ({target_name})")
         self.on_progress("=" * 60)
         self.on_progress(f"  Input:    {cfg.input_path}")
         self.on_progress(f"  Model:    {cfg.model}")
@@ -380,9 +394,25 @@ class TranscriptionPipeline:
             if tmpdir:
                 shutil.rmtree(tmpdir, ignore_errors=True)
 
+        # Step 5: Translate
+        translated_segments = None
+        if cfg.translate and cfg.translate_to:
+            self._check_cancel()
+            current_step += 1
+            target_name = LANGUAGE_CODE_TO_NAME.get(cfg.translate_to, cfg.translate_to)
+            self.on_step(current_step, total_steps, f"Translating to {target_name}")
+            self.on_progress("")
+
+            source_name = LANGUAGE_CODE_TO_NAME.get(detected_lang, detected_lang) if detected_lang else None
+            translated_segments = translate_segments(
+                segments, target_name, openrouter_key, cfg.translation_model,
+                source_language=source_name, api_base=cfg.api_base,
+                on_progress=self.on_progress,
+            )
+
         self._check_cancel()
 
-        # Step 5: Format output
+        # Step 6: Format output
         current_step += 1
         self.on_step(current_step, total_steps, "Formatting output")
 
@@ -413,6 +443,22 @@ class TranscriptionPipeline:
             subtitle_min_chars=cfg.subtitle_min_chars,
         )
 
+        # Format translated output (if translation was done)
+        translated_output_text = ""
+        if translated_segments:
+            translated_output_text = format_output(
+                translated_segments, cfg.output_format,
+                diarized=cfg.diarize,
+                visual_context=visual_context,
+                summary=summary,
+                metadata=metadata,
+                subtitle_speakers=cfg.subtitle_speakers,
+                subtitle_max_chars=cfg.subtitle_max_chars,
+                subtitle_max_duration=cfg.subtitle_max_duration,
+                subtitle_max_gap=cfg.subtitle_max_gap,
+                subtitle_min_chars=cfg.subtitle_min_chars,
+            )
+
         total_elapsed = time.time() - total_t0
         self.on_progress(f"\nTotal time: {total_elapsed:.1f}s")
         self.on_progress(f"Segments: {len(segments)}")
@@ -420,6 +466,8 @@ class TranscriptionPipeline:
             self.on_progress(f"Keyframes analyzed: {len(visual_context)}")
         if summary:
             self.on_progress("Meeting summary: generated")
+        if translated_segments:
+            self.on_progress(f"Translation: {LANGUAGE_CODE_TO_NAME.get(cfg.translate_to, cfg.translate_to)}")
 
         # Determine output path
         output_path = cfg.output_path
@@ -428,12 +476,12 @@ class TranscriptionPipeline:
             if cfg.output_format != "txt":
                 ext_map = {"md": ".md", "srt": ".srt", "vtt": ".vtt", "json": ".json", "tsv": ".tsv"}
                 output_path = base + ext_map[cfg.output_format]
-            elif cfg.diarize or cfg.vision or cfg.summarize:
+            elif cfg.diarize or cfg.vision or cfg.summarize or cfg.translate:
                 output_path = base + "_transcript.txt"
             if output_path:
                 self.on_progress(f"Auto-saving to: {output_path}")
 
-        # Write output
+        # Write original output
         if output_path:
             try:
                 with open(output_path, "w", encoding="utf-8") as f:
@@ -442,6 +490,19 @@ class TranscriptionPipeline:
             except OSError as e:
                 self.on_progress(f"Error: Could not write output file: {e}")
 
+        # Write translated output (e.g. file.ar.srt)
+        translated_output_path = None
+        if translated_segments and output_path:
+            base_no_ext, ext = os.path.splitext(output_path)
+            translated_output_path = f"{base_no_ext}.{cfg.translate_to}{ext}"
+            try:
+                with open(translated_output_path, "w", encoding="utf-8") as f:
+                    f.write(translated_output_text)
+                self.on_progress(f"Saved translation to: {translated_output_path}")
+            except OSError as e:
+                self.on_progress(f"Error: Could not write translated output: {e}")
+                translated_output_path = None
+
         return PipelineResult(
             segments=segments,
             visual_context=visual_context,
@@ -449,5 +510,8 @@ class TranscriptionPipeline:
             metadata=metadata,
             output_text=output_text,
             output_path=output_path,
+            translated_segments=translated_segments,
+            translated_output_text=translated_output_text,
+            translated_output_path=translated_output_path,
             elapsed=total_elapsed,
         )
