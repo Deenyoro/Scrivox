@@ -12,7 +12,8 @@ import torch
 
 from .constants import (
     AUDIO_EXTENSIONS, DEFAULT_DIARIZATION_MODEL, DEFAULT_SUMMARY_MODEL,
-    DEFAULT_TRANSLATION_MODEL, DEFAULT_VISION_MODEL, LANGUAGE_CODE_TO_NAME,
+    DEFAULT_TRANSLATION_MODEL, DEFAULT_VISION_MODEL,
+    LANGUAGE_CODE_TO_NAME, TRANSLATION_CODE_TO_NAME,
     VIDEO_EXTENSIONS,
 )
 from .media import check_ffmpeg, extract_wav, get_media_duration, has_video_stream
@@ -189,7 +190,7 @@ class TranscriptionPipeline:
         if cfg.diarize and not hf_token and not has_bundled:
             raise PipelineError("Diarization requires HF_TOKEN in .env, config, or huggingface-cli login")
 
-        is_local = cfg.api_base and "localhost" in cfg.api_base
+        is_local = cfg.api_base and any(h in cfg.api_base for h in ("localhost", "127.0.0.1", "0.0.0.0"))
         if (cfg.vision or cfg.summarize or cfg.translate) and not openrouter_key and not is_local:
             raise PipelineError("Vision/Summary/Translation requires an LLM API key in .env or config")
 
@@ -209,7 +210,7 @@ class TranscriptionPipeline:
         if cfg.summarize:
             self.on_progress("  + MEETING SUMMARY")
         if cfg.translate and cfg.translate_to:
-            target_name = LANGUAGE_CODE_TO_NAME.get(cfg.translate_to, cfg.translate_to)
+            target_name = TRANSLATION_CODE_TO_NAME.get(cfg.translate_to, cfg.translate_to)
             self.on_progress(f"  + TRANSLATION ({target_name})")
         self.on_progress("=" * 60)
         self.on_progress(f"  Input:    {cfg.input_path}")
@@ -399,7 +400,7 @@ class TranscriptionPipeline:
         if cfg.translate and cfg.translate_to:
             self._check_cancel()
             current_step += 1
-            target_name = LANGUAGE_CODE_TO_NAME.get(cfg.translate_to, cfg.translate_to)
+            target_name = TRANSLATION_CODE_TO_NAME.get(cfg.translate_to, cfg.translate_to)
             self.on_step(current_step, total_steps, f"Translating to {target_name}")
             self.on_progress("")
 
@@ -467,7 +468,7 @@ class TranscriptionPipeline:
         if summary:
             self.on_progress("Meeting summary: generated")
         if translated_segments:
-            self.on_progress(f"Translation: {LANGUAGE_CODE_TO_NAME.get(cfg.translate_to, cfg.translate_to)}")
+            self.on_progress(f"Translation: {TRANSLATION_CODE_TO_NAME.get(cfg.translate_to, cfg.translate_to)}")
 
         # Determine output path
         output_path = cfg.output_path

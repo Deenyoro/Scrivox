@@ -254,8 +254,10 @@ class ScrivoxApp(tk.Tk):
 
         # ffmpeg check
         try:
+            from ..core.media import _subprocess_flags
             subprocess.run(["ffmpeg", "-version"],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3)
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3,
+                           **_subprocess_flags())
         except (FileNotFoundError, subprocess.TimeoutExpired):
             parts.append("ffmpeg: NOT FOUND")
 
@@ -340,7 +342,8 @@ class ScrivoxApp(tk.Tk):
                                      "Vision/Summary/Translation features are not available in the Lite build.")
                 return False
             # Ollama (local) doesn't require an API key
-            is_local = "localhost" in (self.api_frame.get_api_base() or "")
+            _base = self.api_frame.get_api_base() or ""
+            is_local = any(h in _base for h in ("localhost", "127.0.0.1", "0.0.0.0"))
             if not self.api_frame.get_openrouter_key() and not is_local:
                 messagebox.showerror("Error",
                                      "Vision/Summary/Translation requires an LLM API key.\n"
@@ -381,9 +384,9 @@ class ScrivoxApp(tk.Tk):
             min_speakers=s.get_int_or_none(s.min_speakers_var),
             max_speakers=s.get_int_or_none(s.max_speakers_var),
             speaker_names=s.get_speaker_names(),
-            vision_interval=int(s.vision_interval_var.get() or 60),
+            vision_interval=s._safe_int(s.vision_interval_var.get(), 60),
             vision_model=s.vision_model_var.get(),
-            vision_workers=int(s.vision_workers_var.get() or 4),
+            vision_workers=s._safe_int(s.vision_workers_var.get(), 4),
             summary_model=s.summary_model_var.get(),
             translate=s.translate_var.get(),
             translate_to=s.get_translate_to_code(),

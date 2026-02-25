@@ -382,6 +382,14 @@ class SettingsFrame(ttk.Frame):
             return None
         return [n.strip() for n in raw.split(",") if n.strip()]
 
+    @staticmethod
+    def _safe_int(value, default):
+        """Parse a string as int, returning default on failure."""
+        try:
+            return int(value) if value else default
+        except (ValueError, TypeError):
+            return default
+
     def get_int_or_none(self, var):
         """Parse a StringVar as int or return None."""
         val = var.get().strip()
@@ -466,8 +474,8 @@ class SettingsFrame(ttk.Frame):
             "min_speakers": self.get_int_or_none(self.min_speakers_var),
             "max_speakers": self.get_int_or_none(self.max_speakers_var),
             "speaker_names": self.speaker_names_var.get(),
-            "vision_interval": int(self.vision_interval_var.get() or 60),
+            "vision_interval": self._safe_int(self.vision_interval_var.get(), 60),
             "vision_model": self.vision_model_var.get(),
-            "vision_workers": int(self.vision_workers_var.get() or 4),
+            "vision_workers": self._safe_int(self.vision_workers_var.get(), 4),
             "summary_model": self.summary_model_var.get(),
         }

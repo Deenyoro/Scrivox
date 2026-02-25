@@ -9,17 +9,30 @@ import tempfile
 from .constants import VIDEO_EXTENSIONS
 
 
+def _subprocess_flags():
+    """Return kwargs to hide console windows on Windows."""
+    if sys.platform == "win32":
+        return {"creationflags": subprocess.CREATE_NO_WINDOW}
+    return {}
+
+
 def check_ffmpeg(on_progress=print):
-    """Verify ffmpeg and ffprobe are available."""
+    """Verify ffmpeg and ffprobe are available.
+
+    Raises PipelineError if not found (instead of sys.exit).
+    """
     for tool in ("ffmpeg", "ffprobe"):
         try:
             subprocess.run(
                 [tool, "-version"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
+                **_subprocess_flags(),
             )
         except FileNotFoundError:
-            on_progress(f"Error: '{tool}' not found. Install ffmpeg and ensure it's in your PATH.")
-            sys.exit(1)
+            from .pipeline import PipelineError
+            raise PipelineError(
+                f"'{tool}' not found. Install ffmpeg and ensure it's in your PATH."
+            )
         except subprocess.TimeoutExpired:
             pass  # slow but exists
 
@@ -32,6 +45,7 @@ def has_video_stream(file_path):
              "-show_entries", "stream=codec_type",
              "-of", "default=noprint_wrappers=1:nokey=1", file_path],
             capture_output=True, text=True, timeout=10,
+            **_subprocess_flags(),
         )
         return result.stdout.strip() == "video"
     except (subprocess.TimeoutExpired, FileNotFoundError):
@@ -45,6 +59,7 @@ def get_media_duration(file_path):
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
              "-of", "default=noprint_wrappers=1:nokey=1", file_path],
             capture_output=True, text=True, timeout=10,
+            **_subprocess_flags(),
         )
         return float(result.stdout.strip())
     except Exception:
@@ -64,6 +79,7 @@ def list_audio_tracks(file_path):
              "-show_entries", "stream_disposition=default",
              "-of", "json", file_path],
             capture_output=True, text=True, timeout=15,
+            **_subprocess_flags(),
         )
         data = _json.loads(result.stdout)
     except Exception:
@@ -104,6 +120,7 @@ def extract_wav(input_path, track_index=0, on_progress=print):
              "-ac", "1", "-ar", "16000", "-vn", wav_path],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True,
             timeout=600,
+            **_subprocess_flags(),
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         if os.path.exists(wav_path):

@@ -29,6 +29,7 @@ def extract_keyframes(video_path, interval_secs=60, max_frames=30, on_progress=p
 
     on_progress(f"Extracting keyframes every {interval_secs}s from {duration:.0f}s video...")
 
+    from .media import _subprocess_flags
     subprocess.run(
         ["ffmpeg", "-y", "-i", video_path,
          "-vf", f"fps=1/{int(interval_secs)},scale=1280:-2",
@@ -36,6 +37,7 @@ def extract_keyframes(video_path, interval_secs=60, max_frames=30, on_progress=p
          os.path.join(tmpdir, "frame_%04d.jpg")],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True,
         timeout=600,
+        **_subprocess_flags(),
     )
 
     frames = sorted(glob.glob(os.path.join(tmpdir, "frame_*.jpg")))

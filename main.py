@@ -22,9 +22,8 @@ def _attach_console():
             # Try to attach to parent process console
             if kernel32.AttachConsole(-1):  # ATTACH_PARENT_PROCESS = -1
                 # Reopen stdout/stderr to the attached console
-                import os
-                sys.stdout = open("CONOUT$", "w")
-                sys.stderr = open("CONOUT$", "w")
+                sys.stdout = open("CONOUT$", "w", closefd=False)
+                sys.stderr = open("CONOUT$", "w", closefd=False)
         except Exception:
             pass
 

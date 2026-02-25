@@ -79,17 +79,20 @@ def diarize_audio(audio_path, hf_token, num_speakers=None, min_speakers=None,
 
         on_progress(f"Loading {diarization_model} on CUDA...")
         with _allow_unsafe_torch_load():
-            # pyannote >= 3.3 uses 'token'; older versions use 'use_auth_token'
-            try:
-                pipeline = Pipeline.from_pretrained(
-                    diarization_model,
-                    token=hf_token,
-                )
-            except TypeError:
-                pipeline = Pipeline.from_pretrained(
-                    diarization_model,
-                    use_auth_token=hf_token,
-                )
+            if has_bundled:
+                # Bundled models — load from local cache, no token needed
+                pipeline = Pipeline.from_pretrained(diarization_model)
+            else:
+                # Download from HF Hub — needs token
+                # pyannote >= 3.3 uses 'token'; older versions use 'use_auth_token'
+                try:
+                    pipeline = Pipeline.from_pretrained(
+                        diarization_model, token=hf_token,
+                    )
+                except TypeError:
+                    pipeline = Pipeline.from_pretrained(
+                        diarization_model, use_auth_token=hf_token,
+                    )
         pipeline.to(torch.device("cuda"))
 
         on_progress("Running diarization... (this may take several minutes)")

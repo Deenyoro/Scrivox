@@ -135,8 +135,9 @@ def translate_segments(segments, target_language, api_key, translation_model,
         )
 
         # Scale max_tokens to batch content — translations can expand 2-3x
+        # ~1 token per 4 chars, allow 3x expansion for verbose target languages
         input_chars = sum(len(seg["text"]) for seg in batch)
-        estimated_tokens = max(4096, int(input_chars * 3 / 3))  # ~1 token per 3 chars, 3x expansion
+        estimated_tokens = max(4096, input_chars * 3 // 4)
         max_tokens = min(estimated_tokens, 16384)
 
         messages = [{"role": "user", "content": prompt}]
