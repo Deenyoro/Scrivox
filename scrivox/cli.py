@@ -292,4 +292,9 @@ def run_cli(argv=None):
         print("  TRANSCRIPT")
         print("=" * 60)
         print(result.output_text)
+        if result.translated_output_text:
+            print("\n" + "=" * 60)
+            print("  TRANSLATION")
+            print("=" * 60)
+            print(result.translated_output_text)
         print()

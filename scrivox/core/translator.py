@@ -21,14 +21,15 @@ def _parse_numbered_lines(response_text, expected_count):
         line = line.strip()
         if not line:
             continue
-        # Try "N: text" format
+        # Try "N: text" format — only match if prefix is a plausible line number
         if ":" in line:
             parts = line.split(":", 1)
             try:
                 num = int(parts[0].strip())
-                text = parts[1].strip()
-                result[num] = text
-                continue
+                if 1 <= num <= expected_count:
+                    text = parts[1].strip()
+                    result[num] = text
+                    continue
             except ValueError:
                 pass
         # Try "N. text" format
@@ -36,9 +37,10 @@ def _parse_numbered_lines(response_text, expected_count):
             parts = line.split(".", 1)
             try:
                 num = int(parts[0].strip())
-                text = parts[1].strip()
-                result[num] = text
-                continue
+                if 1 <= num <= expected_count:
+                    text = parts[1].strip()
+                    result[num] = text
+                    continue
             except ValueError:
                 pass
 
@@ -52,13 +54,17 @@ def _parse_numbered_lines(response_text, expected_count):
         line = line.strip()
         if not line:
             continue
-        # Strip leading "N: " or "N. "
+        # Strip leading "N: " or "N. " only if N is a plausible line number
         for sep in [":", "."]:
             if sep in line:
                 prefix, rest = line.split(sep, 1)
-                if prefix.strip().isdigit():
-                    line = rest.strip()
-                    break
+                try:
+                    num = int(prefix.strip())
+                    if 1 <= num <= expected_count:
+                        line = rest.strip()
+                        break
+                except ValueError:
+                    pass
         cleaned.append(line)
 
     # Pad or truncate to expected count
@@ -69,7 +75,7 @@ def _parse_numbered_lines(response_text, expected_count):
 
 def translate_segments(segments, target_language, api_key, translation_model,
                        source_language=None, api_base=None, batch_size=25,
-                       on_progress=print):
+                       on_progress=print, cancel_event=None):
     """Translate transcript segments to a target language via LLM API.
 
     Args:
@@ -81,6 +87,7 @@ def translate_segments(segments, target_language, api_key, translation_model,
         api_base: Optional API base URL (defaults to OpenRouter)
         batch_size: Number of segments per API call
         on_progress: Progress callback
+        cancel_event: Optional threading.Event to check for cancellation
 
     Returns:
         List of translated segment dicts (deep copies with translated text).
@@ -99,6 +106,11 @@ def translate_segments(segments, target_language, api_key, translation_model,
     total_batches = (len(segments) + batch_size - 1) // batch_size
 
     for batch_idx in range(total_batches):
+        # Check for cancellation between batches
+        if cancel_event and cancel_event.is_set():
+            on_progress("Translation cancelled.")
+            break
+
         start = batch_idx * batch_size
         end = min(start + batch_size, len(segments))
         batch = segments[start:end]
@@ -122,13 +134,18 @@ def translate_segments(segments, target_language, api_key, translation_model,
             f"{numbered_text}"
         )
 
+        # Scale max_tokens to batch content — translations can expand 2-3x
+        input_chars = sum(len(seg["text"]) for seg in batch)
+        estimated_tokens = max(4096, int(input_chars * 3 / 3))  # ~1 token per 3 chars, 3x expansion
+        max_tokens = min(estimated_tokens, 16384)
+
         messages = [{"role": "user", "content": prompt}]
         response_text = chat_completion(
             messages=messages,
             model=translation_model,
             api_key=api_key,
             api_base=url,
-            max_tokens=4096,
+            max_tokens=max_tokens,
             temperature=0.3,
             max_retries=3,
             timeout=120,

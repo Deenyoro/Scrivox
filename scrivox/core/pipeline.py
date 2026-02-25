@@ -407,7 +407,7 @@ class TranscriptionPipeline:
             translated_segments = translate_segments(
                 segments, target_name, openrouter_key, cfg.translation_model,
                 source_language=source_name, api_base=cfg.api_base,
-                on_progress=self.on_progress,
+                on_progress=self.on_progress, cancel_event=self._cancel,
             )
 
         self._check_cancel()
