@@ -446,7 +446,8 @@ class ScrivoxApp(tk.Tk):
 
             for i, job in enumerate(jobs):
                 if self._cancel.is_set():
-                    break
+                    self.after(0, self._on_pipeline_cancelled)
+                    return
 
                 # Update file-level progress
                 filename = os.path.basename(job.file_path)
@@ -505,9 +506,9 @@ class ScrivoxApp(tk.Tk):
     def _cancel_pipeline(self):
         """Request pipeline cancellation."""
         self._cancel.set()
+        self._cancel_btn.configure(state=tk.DISABLED)
         if self._pipeline:
             self._pipeline.cancel()
-            self._cancel_btn.configure(state=tk.DISABLED)
 
     def _on_batch_complete(self, results):
         """Called on main thread when all jobs finish."""

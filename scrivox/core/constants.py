@@ -92,3 +92,22 @@ WHISPER_LANGUAGES = OrderedDict([
 
 # Reverse lookup: code -> display name
 LANGUAGE_CODE_TO_NAME = {code: name for name, code in WHISPER_LANGUAGES.items()}
+
+# Build translation target list: Whisper languages + regional variants
+# inserted after their parent language for clean dropdown ordering
+def _build_translation_languages():
+    """Build ordered translation target list with regional variants."""
+    # Variants to insert after their parent language
+    _extras = {
+        "zh": [("Chinese (Simplified)", "zh-CN"), ("Chinese (Traditional)", "zh-TW")],
+        "pt": [("Portuguese (Brazil)", "pt-BR")],
+    }
+    items = []
+    for name, code in WHISPER_LANGUAGES.items():
+        items.append((name, code))
+        if code in _extras:
+            items.extend(_extras[code])
+    return OrderedDict(items)
+
+TRANSLATION_LANGUAGES = _build_translation_languages()
+TRANSLATION_CODE_TO_NAME = {code: name for name, code in TRANSLATION_LANGUAGES.items()}

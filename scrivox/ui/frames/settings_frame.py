@@ -5,7 +5,7 @@ from tkinter import ttk
 
 from ...core.constants import (
     DEFAULT_TRANSLATION_MODEL, DEFAULT_VISION_MODEL, DEFAULT_SUMMARY_MODEL,
-    WHISPER_LANGUAGES, WHISPER_MODELS,
+    TRANSLATION_LANGUAGES, WHISPER_LANGUAGES, WHISPER_MODELS,
 )
 from ...core.features import has_diarization, has_advanced_features
 from ..theme import COLORS, FONTS
@@ -250,7 +250,7 @@ class SettingsFrame(ttk.Frame):
         row.pack(fill=tk.X, padx=8, pady=(8, 4))
         ttk.Label(row, text="Target:").pack(side=tk.LEFT)
         # Exclude blank entry for target — must pick a language
-        translate_langs = [f"{name} ({code})" for name, code in WHISPER_LANGUAGES.items()]
+        translate_langs = [f"{name} ({code})" for name, code in TRANSLATION_LANGUAGES.items()]
         self._translate_to_combo = ttk.Combobox(
             row, textvariable=self.translate_to_var,
             values=translate_langs, state="normal", width=20)
@@ -423,8 +423,8 @@ class SettingsFrame(ttk.Frame):
         # Translation settings
         translate_to_val = settings.get("translate_to", "")
         if translate_to_val and "(" not in translate_to_val:
-            from ...core.constants import LANGUAGE_CODE_TO_NAME
-            name = LANGUAGE_CODE_TO_NAME.get(translate_to_val)
+            from ...core.constants import TRANSLATION_CODE_TO_NAME
+            name = TRANSLATION_CODE_TO_NAME.get(translate_to_val)
             if name:
                 translate_to_val = f"{name} ({translate_to_val})"
         self.translate_to_var.set(translate_to_val)

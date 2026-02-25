@@ -158,6 +158,7 @@ class ApiFrame(ttk.LabelFrame):
             ant_key = self.anthropic_key_var.get().strip()
             provider = self.provider_var.get()
 
+            # Only test HF token if it's set — skip entirely on Full builds
             if hf:
                 try:
                     import requests
@@ -167,25 +168,19 @@ class ApiFrame(ttk.LabelFrame):
                         timeout=10,
                     )
                     if resp.status_code == 200:
-                        results.append("HuggingFace: Valid")
+                        results.append("HF: OK")
                     elif resp.status_code == 401:
-                        results.append("HuggingFace: Invalid token (401)")
+                        results.append("HF: Invalid (401)")
                     else:
-                        results.append(f"HuggingFace: Error ({resp.status_code})")
+                        results.append(f"HF: Error ({resp.status_code})")
                 except Exception as e:
-                    results.append(f"HuggingFace: {type(e).__name__}")
-            else:
-                if self._has_bundled:
-                    results.append("HuggingFace: not set (bundled models OK)")
-                else:
-                    results.append("HuggingFace: not set")
+                    results.append(f"HF: {type(e).__name__}")
 
             # Test the active provider's key
             if provider == "Anthropic":
                 if ant_key:
                     try:
                         import requests
-                        # Test with a minimal messages request
                         resp = requests.post(
                             "https://api.anthropic.com/v1/messages",
                             headers={
@@ -201,11 +196,11 @@ class ApiFrame(ttk.LabelFrame):
                             timeout=15,
                         )
                         if resp.status_code == 200:
-                            results.append("Anthropic: Valid")
+                            results.append("Anthropic: OK")
                         elif resp.status_code == 401:
-                            results.append("Anthropic: Invalid key (401)")
+                            results.append("Anthropic: Invalid (401)")
                         elif resp.status_code == 403:
-                            results.append("Anthropic: Forbidden (403)")
+                            results.append("Anthropic: Forbidden")
                         else:
                             results.append(f"Anthropic: Error ({resp.status_code})")
                     except Exception as e:
@@ -217,7 +212,6 @@ class ApiFrame(ttk.LabelFrame):
                     try:
                         import requests
                         base_url = self.get_api_base()
-                        # Test by sending a minimal request
                         test_url = base_url.replace("/chat/completions", "/models")
                         resp = requests.get(
                             test_url,
@@ -225,9 +219,9 @@ class ApiFrame(ttk.LabelFrame):
                             timeout=10,
                         )
                         if resp.status_code == 200:
-                            results.append("API: Valid")
+                            results.append("API: OK")
                         elif resp.status_code == 401:
-                            results.append("API: Invalid key (401)")
+                            results.append("API: Invalid (401)")
                         else:
                             results.append(f"API: Error ({resp.status_code})")
                     except Exception as e:
@@ -235,8 +229,11 @@ class ApiFrame(ttk.LabelFrame):
                 else:
                     results.append("API: not set")
 
+            if not results:
+                results.append("No keys to test")
+
             status_text = " | ".join(results)
-            all_ok = all("Valid" in r or "bundled" in r for r in results if "not set" not in r)
+            all_ok = all("OK" in r for r in results if "not set" not in r)
 
             try:
                 self.after(0, lambda: self._update_test_status(status_text, all_ok))
