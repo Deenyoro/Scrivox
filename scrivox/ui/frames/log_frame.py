@@ -1,4 +1,4 @@
-"""Scrollable read-only log text widget."""
+"""Scrollable read-only log text widget with batched inserts."""
 
 import tkinter as tk
 from tkinter import ttk
@@ -7,10 +7,12 @@ from ..theme import COLORS, FONTS
 
 
 class LogFrame(ttk.LabelFrame):
-    """Read-only scrolling text log."""
+    """Read-only scrolling text log with batched inserts for performance."""
 
     def __init__(self, parent, **kwargs):
         super().__init__(parent, text="LOG", **kwargs)
+        self._buffer = []
+        self._flush_id = None
         self._build()
 
     def _build(self):
@@ -41,13 +43,28 @@ class LogFrame(ttk.LabelFrame):
 
     def clear(self):
         """Clear the log."""
+        self._buffer.clear()
+        if self._flush_id is not None:
+            self.after_cancel(self._flush_id)
+            self._flush_id = None
         self.text_widget.configure(state=tk.NORMAL)
         self.text_widget.delete("1.0", tk.END)
         self.text_widget.configure(state=tk.DISABLED)
 
     def append(self, text):
-        """Append text to the log (thread-safe if called via root.after)."""
+        """Buffer text and schedule a batched flush (thread-safe if called via root.after)."""
+        self._buffer.append(text)
+        if self._flush_id is None:
+            self._flush_id = self.after(32, self._flush)
+
+    def _flush(self):
+        """Flush buffered messages in a single NORMAL/insert/see/DISABLED cycle."""
+        self._flush_id = None
+        if not self._buffer:
+            return
+        combined = "".join(self._buffer)
+        self._buffer.clear()
         self.text_widget.configure(state=tk.NORMAL)
-        self.text_widget.insert(tk.END, text)
+        self.text_widget.insert(tk.END, combined)
         self.text_widget.see(tk.END)
         self.text_widget.configure(state=tk.DISABLED)

@@ -106,10 +106,23 @@ class PipelineResult:
     metadata: Optional[dict] = None
     output_text: str = ""
     output_path: Optional[str] = None
-    translated_segments: Optional[list] = None
-    translated_output_text: str = ""
-    translated_output_path: Optional[str] = None
+    translated_outputs: list = field(default_factory=list)
+    # Each entry: {"lang_code": "ar", "lang_name": "Arabic", "segments": [...],
+    #              "output_text": "...", "output_path": "..."}
     elapsed: float = 0.0
+
+    # Backward-compat properties for single-language consumers
+    @property
+    def translated_segments(self):
+        return self.translated_outputs[0]["segments"] if self.translated_outputs else None
+
+    @property
+    def translated_output_text(self):
+        return self.translated_outputs[0]["output_text"] if self.translated_outputs else ""
+
+    @property
+    def translated_output_path(self):
+        return self.translated_outputs[0]["output_path"] if self.translated_outputs else None
 
 
 class TranscriptionPipeline:
@@ -155,8 +168,9 @@ class TranscriptionPipeline:
             steps += 1
         if self.config.summarize:
             steps += 1
-        if self.config.translate:
-            steps += 1
+        if self.config.translate and self.config.translate_to:
+            num_langs = len([c for c in self.config.translate_to.split(",") if c.strip()])
+            steps += num_langs
         steps += 1  # format output
         return steps
 
@@ -214,8 +228,9 @@ class TranscriptionPipeline:
         if cfg.summarize:
             self.on_progress("  + MEETING SUMMARY")
         if cfg.translate and cfg.translate_to:
-            target_name = TRANSLATION_CODE_TO_NAME.get(cfg.translate_to, cfg.translate_to)
-            self.on_progress(f"  + TRANSLATION ({target_name})")
+            target_codes = [c.strip() for c in cfg.translate_to.split(",") if c.strip()]
+            target_names = [TRANSLATION_CODE_TO_NAME.get(c, c) for c in target_codes]
+            self.on_progress(f"  + TRANSLATION ({', '.join(target_names)})")
         self.on_progress("=" * 60)
         self.on_progress(f"  Input:    {cfg.input_path}")
         self.on_progress(f"  Model:    {cfg.model}")
@@ -399,54 +414,67 @@ class TranscriptionPipeline:
             if tmpdir:
                 shutil.rmtree(tmpdir, ignore_errors=True)
 
-        # Step 5: Translate
-        translated_segments = None
-        translated_summary = None
-        translated_visual_context = None
-        translated_headers = None
+        # Step 5: Translate (one step per target language)
+        translated_results = []  # list of per-language dicts
         if cfg.translate and cfg.translate_to:
-            self._check_cancel()
-            current_step += 1
-            target_name = TRANSLATION_CODE_TO_NAME.get(cfg.translate_to, cfg.translate_to)
-            self.on_step(current_step, total_steps, f"Translating to {target_name}")
-            self.on_progress("")
-
+            target_codes = [c.strip() for c in cfg.translate_to.split(",") if c.strip()]
             source_name = LANGUAGE_CODE_TO_NAME.get(detected_lang, detected_lang) if detected_lang else None
-            _tr_kwargs = dict(
-                target_language=target_name,
-                api_key=openrouter_key,
-                translation_model=cfg.translation_model,
-                source_language=source_name,
-                api_base=cfg.api_base,
-                on_progress=self.on_progress,
-            )
-            translated_segments = translate_segments(
-                segments, cancel_event=self._cancel, **_tr_kwargs,
-            )
 
-            # Translate all content (summary, vision descriptions, headers)
-            if cfg.translate_all:
+            for lang_code in target_codes:
                 self._check_cancel()
-                if summary:
-                    self.on_progress("  Translating summary...")
-                    translated_summary = translate_text(summary, **_tr_kwargs)
+                current_step += 1
+                target_name = TRANSLATION_CODE_TO_NAME.get(lang_code, lang_code)
+                self.on_step(current_step, total_steps, f"Translating to {target_name}")
+                self.on_progress("")
 
-                if visual_context:
-                    self._check_cancel()
-                    self.on_progress("  Translating visual descriptions...")
-                    descs = [vc["description"] for vc in visual_context]
-                    translated_descs = translate_strings(descs, **_tr_kwargs)
-                    translated_visual_context = copy.deepcopy(visual_context)
-                    for i, vc in enumerate(translated_visual_context):
-                        if i < len(translated_descs):
-                            vc["description"] = translated_descs[i]
-
-                self._check_cancel()
-                self.on_progress("  Translating headers...")
-                header_translations = translate_strings(
-                    TRANSLATABLE_HEADERS, **_tr_kwargs,
+                _tr_kwargs = dict(
+                    target_language=target_name,
+                    api_key=openrouter_key,
+                    translation_model=cfg.translation_model,
+                    source_language=source_name,
+                    api_base=cfg.api_base,
+                    on_progress=self.on_progress,
                 )
-                translated_headers = dict(zip(TRANSLATABLE_HEADERS, header_translations))
+                lang_segments = translate_segments(
+                    segments, cancel_event=self._cancel, **_tr_kwargs,
+                )
+
+                lang_summary = None
+                lang_visual_context = None
+                lang_headers = None
+
+                # Translate all content (summary, vision descriptions, headers)
+                if cfg.translate_all:
+                    self._check_cancel()
+                    if summary:
+                        self.on_progress("  Translating summary...")
+                        lang_summary = translate_text(summary, **_tr_kwargs)
+
+                    if visual_context:
+                        self._check_cancel()
+                        self.on_progress("  Translating visual descriptions...")
+                        descs = [vc["description"] for vc in visual_context]
+                        translated_descs = translate_strings(descs, **_tr_kwargs)
+                        lang_visual_context = copy.deepcopy(visual_context)
+                        for i, vc in enumerate(lang_visual_context):
+                            if i < len(translated_descs):
+                                vc["description"] = translated_descs[i]
+
+                    self._check_cancel()
+                    self.on_progress("  Translating headers...")
+                    header_translations = translate_strings(
+                        TRANSLATABLE_HEADERS, **_tr_kwargs,
+                    )
+                    lang_headers = dict(zip(TRANSLATABLE_HEADERS, header_translations))
+
+                translated_results.append({
+                    "lang_code": lang_code,
+                    "lang_name": target_name,
+                    "segments": lang_segments,
+                    "summary": lang_summary,
+                    "visual_context": lang_visual_context,
+                    "headers": lang_headers,
+                })
 
         self._check_cancel()
 
@@ -481,21 +509,20 @@ class TranscriptionPipeline:
             subtitle_min_chars=cfg.subtitle_min_chars,
         )
 
-        # Format translated output (if translation was done)
-        translated_output_text = ""
-        if translated_segments:
-            translated_output_text = format_output(
-                translated_segments, cfg.output_format,
+        # Format translated outputs (one per target language)
+        for tr in translated_results:
+            tr["output_text"] = format_output(
+                tr["segments"], cfg.output_format,
                 diarized=cfg.diarize,
-                visual_context=translated_visual_context or visual_context,
-                summary=translated_summary or summary,
+                visual_context=tr["visual_context"] or visual_context,
+                summary=tr["summary"] or summary,
                 metadata=metadata,
                 subtitle_speakers=cfg.subtitle_speakers,
                 subtitle_max_chars=cfg.subtitle_max_chars,
                 subtitle_max_duration=cfg.subtitle_max_duration,
                 subtitle_max_gap=cfg.subtitle_max_gap,
                 subtitle_min_chars=cfg.subtitle_min_chars,
-                header_overrides=translated_headers,
+                header_overrides=tr["headers"],
             )
 
         total_elapsed = time.time() - total_t0
@@ -505,8 +532,9 @@ class TranscriptionPipeline:
             self.on_progress(f"Keyframes analyzed: {len(visual_context)}")
         if summary:
             self.on_progress("Meeting summary: generated")
-        if translated_segments:
-            self.on_progress(f"Translation: {TRANSLATION_CODE_TO_NAME.get(cfg.translate_to, cfg.translate_to)}")
+        if translated_results:
+            lang_names = [tr["lang_name"] for tr in translated_results]
+            self.on_progress(f"Translation: {', '.join(lang_names)}")
 
         # Determine output path
         output_path = cfg.output_path
@@ -529,18 +557,19 @@ class TranscriptionPipeline:
             except OSError as e:
                 self.on_progress(f"Error: Could not write output file: {e}")
 
-        # Write translated output (e.g. file.ar.srt)
-        translated_output_path = None
-        if translated_segments and output_path:
-            base_no_ext, ext = os.path.splitext(output_path)
-            translated_output_path = f"{base_no_ext}.{cfg.translate_to}{ext}"
-            try:
-                with open(translated_output_path, "w", encoding="utf-8") as f:
-                    f.write(translated_output_text)
-                self.on_progress(f"Saved translation to: {translated_output_path}")
-            except OSError as e:
-                self.on_progress(f"Error: Could not write translated output: {e}")
-                translated_output_path = None
+        # Write translated outputs (e.g. file.ar.srt, file.fr.srt)
+        for tr in translated_results:
+            tr["output_path"] = None
+            if tr["segments"] and output_path:
+                base_no_ext, ext = os.path.splitext(output_path)
+                tr["output_path"] = f"{base_no_ext}.{tr['lang_code']}{ext}"
+                try:
+                    with open(tr["output_path"], "w", encoding="utf-8") as f:
+                        f.write(tr["output_text"])
+                    self.on_progress(f"Saved translation to: {tr['output_path']}")
+                except OSError as e:
+                    self.on_progress(f"Error: Could not write translated output: {e}")
+                    tr["output_path"] = None
 
         return PipelineResult(
             segments=segments,
@@ -549,8 +578,6 @@ class TranscriptionPipeline:
             metadata=metadata,
             output_text=output_text,
             output_path=output_path,
-            translated_segments=translated_segments,
-            translated_output_text=translated_output_text,
-            translated_output_path=translated_output_path,
+            translated_outputs=translated_results,
             elapsed=total_elapsed,
         )

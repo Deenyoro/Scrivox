@@ -28,6 +28,31 @@ LLM_PROVIDERS = {
 DEFAULT_LLM_PROVIDER = "OpenRouter"
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
 
+# Preset model lists for combobox dropdowns
+LLM_MODEL_PRESETS = [
+    "google/gemini-2.5-flash",
+    "google/gemini-2.5-pro",
+    "google/gemini-2.0-flash-exp:free",
+    "anthropic/claude-sonnet-4-20250514",
+    "anthropic/claude-haiku-4-20250414",
+    "openai/gpt-4o",
+    "openai/gpt-4o-mini",
+    "meta-llama/llama-3.3-70b-instruct",
+    "deepseek/deepseek-chat-v3-0324",
+    "qwen/qwen-2.5-72b-instruct",
+    "mistralai/mistral-small-3.1-24b-instruct",
+]
+
+VISION_MODEL_PRESETS = [
+    "google/gemini-2.5-flash",
+    "google/gemini-2.5-pro",
+    "google/gemini-2.0-flash-exp:free",
+    "anthropic/claude-sonnet-4-20250514",
+    "anthropic/claude-haiku-4-20250414",
+    "openai/gpt-4o",
+    "openai/gpt-4o-mini",
+]
+
 # Whisper-supported languages: display name -> ISO 639-1 code
 # Ordered alphabetically by display name for UI dropdowns
 WHISPER_LANGUAGES = OrderedDict([

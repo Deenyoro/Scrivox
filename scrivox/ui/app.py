@@ -56,7 +56,7 @@ class ScrivoxApp(tk.Tk):
         self._build_ui()
         self._load_saved_settings()
         self._setup_keyboard_shortcuts()
-        self._run_preflight_checks()
+        self.after(100, self._run_preflight_checks)
 
         # Handle window close
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -119,7 +119,7 @@ class ScrivoxApp(tk.Tk):
             if self._scroll_update_id:
                 left_canvas.after_cancel(self._scroll_update_id)
             self._scroll_update_id = left_canvas.after(
-                16, lambda: left_canvas.configure(scrollregion=left_canvas.bbox("all")))
+                50, lambda: left_canvas.configure(scrollregion=left_canvas.bbox("all")))
 
         self._left_inner.bind("<Configure>", _update_scrollregion)
 
@@ -351,7 +351,7 @@ class ScrivoxApp(tk.Tk):
                 return False
 
         if settings.translate_var.get():
-            if not settings.get_translate_to_code():
+            if not settings.get_translate_to_codes():
                 messagebox.showerror("Error",
                                      "Translation is enabled but no target language selected.\n"
                                      "Pick a target language in the Translation section.")
@@ -390,7 +390,7 @@ class ScrivoxApp(tk.Tk):
             summary_model=s.summary_model_var.get(),
             translate=s.translate_var.get(),
             translate_all=s.translate_all_var.get(),
-            translate_to=s.get_translate_to_code(),
+            translate_to=s.get_translate_to_codes(),
             translation_model=s.translation_model_var.get(),
             output_format=self.output_frame.format_var.get(),
             output_path=self.output_frame.output_path_var.get() or None,
@@ -530,15 +530,17 @@ class ScrivoxApp(tk.Tk):
 
         if len(results) == 1:
             self.results_frame.show_result(last.output_text, last.output_path)
-            if last.translated_output_path:
-                self._on_progress(f"Translation saved to: {last.translated_output_path}")
+            for tr in last.translated_outputs:
+                if tr.get("output_path"):
+                    self._on_progress(f"Translation ({tr['lang_name']}) saved to: {tr['output_path']}")
         else:
             summary_lines = [f"Batch complete: {len(results)} job(s) finished\n"]
             for r in results:
                 path = r.output_path or "(console)"
                 summary_lines.append(f"  - {r.metadata.get('input_file', '?')} -> {path}")
-                if r.translated_output_path:
-                    summary_lines.append(f"    (translation: {r.translated_output_path})")
+                for tr in r.translated_outputs:
+                    if tr.get("output_path"):
+                        summary_lines.append(f"    ({tr['lang_name']}: {tr['output_path']})")
             summary_lines.append(f"\nTotal time: {total_elapsed:.1f}s")
             summary_text = "\n".join(summary_lines)
             self.results_frame.show_result(summary_text, last.output_path)

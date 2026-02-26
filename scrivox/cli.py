@@ -84,8 +84,8 @@ def build_parser():
     # Translation options
     translate_group = parser.add_argument_group("Translation")
     translate_group.add_argument("--translate-to", default=None,
-                                 help="Translate transcript to target language code (e.g. 'ar', 'fr', 'ja'). "
-                                      "Produces a second output file with the translation.")
+                                 help="Translate to target language(s). Comma-separated for multiple: "
+                                      "'ar' or 'ar,fr,ja'. Produces additional output files per target language.")
     translate_group.add_argument("--translate-all", action="store_true",
                                  help="Also translate summary, vision descriptions, and document headers "
                                       "(not just transcript segments)")
@@ -286,9 +286,10 @@ def run_cli(argv=None):
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Print translated output path
-    if result.translated_output_path:
-        print(f"Translation saved to: {result.translated_output_path}")
+    # Print translated output paths
+    for tr in result.translated_outputs:
+        if tr.get("output_path"):
+            print(f"Translation ({tr['lang_name']}) saved to: {tr['output_path']}")
 
     # Print to console if no output file
     if not result.output_path:
@@ -296,9 +297,10 @@ def run_cli(argv=None):
         print("  TRANSCRIPT")
         print("=" * 60)
         print(result.output_text)
-        if result.translated_output_text:
-            print("\n" + "=" * 60)
-            print("  TRANSLATION")
-            print("=" * 60)
-            print(result.translated_output_text)
+        for tr in result.translated_outputs:
+            if tr.get("output_text"):
+                print("\n" + "=" * 60)
+                print(f"  TRANSLATION ({tr['lang_name']})")
+                print("=" * 60)
+                print(tr["output_text"])
         print()

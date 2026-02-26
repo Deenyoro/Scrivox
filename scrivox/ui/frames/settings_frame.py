@@ -5,10 +5,12 @@ from tkinter import ttk
 
 from ...core.constants import (
     DEFAULT_TRANSLATION_MODEL, DEFAULT_VISION_MODEL, DEFAULT_SUMMARY_MODEL,
+    LLM_MODEL_PRESETS, VISION_MODEL_PRESETS,
     TRANSLATION_LANGUAGES, WHISPER_LANGUAGES, WHISPER_MODELS,
 )
 from ...core.features import has_diarization, has_advanced_features
 from ..theme import COLORS, FONTS
+from ..widgets import AutocompleteCombobox
 
 # Build display values for language dropdowns: ["", "Afrikaans (af)", "Arabic (ar)", ...]
 _LANGUAGE_DISPLAY_VALUES = [""] + [f"{name} ({code})" for name, code in WHISPER_LANGUAGES.items()]
@@ -104,8 +106,8 @@ class SettingsFrame(ttk.Frame):
         row1 = ttk.Frame(model_frame)
         row1.pack(fill=tk.X, padx=8, pady=(8, 4))
         ttk.Label(row1, text="Model:").pack(side=tk.LEFT)
-        model_combo = ttk.Combobox(row1, textvariable=self.model_var,
-                                    values=WHISPER_MODELS, state="normal", width=16)
+        model_combo = AutocompleteCombobox(row1, textvariable=self.model_var,
+                                          values=WHISPER_MODELS, state="normal", width=16)
         model_combo.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
         ToolTip(model_combo, "tiny/base: fast, lower quality\n"
                              "small/medium: balanced\n"
@@ -115,8 +117,8 @@ class SettingsFrame(ttk.Frame):
         row2 = ttk.Frame(model_frame)
         row2.pack(fill=tk.X, padx=8, pady=(0, 8))
         ttk.Label(row2, text="Language:").pack(side=tk.LEFT)
-        lang_combo = ttk.Combobox(row2, textvariable=self.language_var,
-                                   values=_LANGUAGE_DISPLAY_VALUES, state="normal", width=20)
+        lang_combo = AutocompleteCombobox(row2, textvariable=self.language_var,
+                                         values=_LANGUAGE_DISPLAY_VALUES, state="normal", width=20)
         lang_combo.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
         ToolTip(lang_combo, "Leave blank for auto-detect\n"
                             "Select from list or type a language code")
@@ -220,7 +222,9 @@ class SettingsFrame(ttk.Frame):
         row = ttk.Frame(self._vision_frame)
         row.pack(fill=tk.X, padx=8, pady=2)
         ttk.Label(row, text="Model:").pack(side=tk.LEFT)
-        ttk.Entry(row, textvariable=self.vision_model_var).pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
+        AutocompleteCombobox(row, textvariable=self.vision_model_var,
+                             values=VISION_MODEL_PRESETS, state="normal").pack(
+            side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
 
         row = ttk.Frame(self._vision_frame)
         row.pack(fill=tk.X, padx=8, pady=(2, 4))
@@ -242,7 +246,9 @@ class SettingsFrame(ttk.Frame):
         row = ttk.Frame(self._summary_frame)
         row.pack(fill=tk.X, padx=8, pady=(8, 8))
         ttk.Label(row, text="Model:").pack(side=tk.LEFT)
-        ttk.Entry(row, textvariable=self.summary_model_var).pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
+        AutocompleteCombobox(row, textvariable=self.summary_model_var,
+                             values=LLM_MODEL_PRESETS, state="normal").pack(
+            side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
 
         # ── TRANSLATION SUB-SETTINGS ──
         self._translate_frame = ttk.LabelFrame(self, text="TRANSLATION")
@@ -252,11 +258,13 @@ class SettingsFrame(ttk.Frame):
         ttk.Label(row, text="Target:").pack(side=tk.LEFT)
         # Exclude blank entry for target — must pick a language
         translate_langs = [f"{name} ({code})" for name, code in TRANSLATION_LANGUAGES.items()]
-        self._translate_to_combo = ttk.Combobox(
+        self._translate_to_combo = AutocompleteCombobox(
             row, textvariable=self.translate_to_var,
             values=translate_langs, state="normal", width=20)
         self._translate_to_combo.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
-        ToolTip(self._translate_to_combo, "Target language for translation")
+        ToolTip(self._translate_to_combo, "Target language for translation\n"
+                                         "Comma-separated for multiple:\n"
+                                         "e.g. Arabic (ar), French (fr)")
 
         cb_all = ttk.Checkbutton(self._translate_frame,
                                   text="Translate all content",
@@ -268,11 +276,12 @@ class SettingsFrame(ttk.Frame):
         row = ttk.Frame(self._translate_frame)
         row.pack(fill=tk.X, padx=8, pady=(2, 4))
         ttk.Label(row, text="Model:").pack(side=tk.LEFT)
-        ttk.Entry(row, textvariable=self.translation_model_var).pack(
+        AutocompleteCombobox(row, textvariable=self.translation_model_var,
+                             values=LLM_MODEL_PRESETS, state="normal").pack(
             side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
 
         ttk.Label(self._translate_frame,
-                  text="Produces a second output file with the translation",
+                  text="Produces additional output files per target language",
                   style="Dim.TLabel").pack(padx=8, pady=(0, 6), anchor=tk.W)
 
         # Initialize speaker mode display
@@ -379,9 +388,22 @@ class SettingsFrame(ttk.Frame):
         """Extract language code from the language combobox display value."""
         return _extract_language_code(self.language_var.get()) or None
 
-    def get_translate_to_code(self):
-        """Extract language code from the translate-to combobox display value."""
-        return _extract_language_code(self.translate_to_var.get()) or None
+    def get_translate_to_codes(self):
+        """Extract language code(s) from the translate-to combobox display value.
+
+        Supports comma-separated entries like 'Arabic (ar), French (fr)' or 'ar,fr'.
+        Returns a comma-separated string of codes like 'ar,fr', or None if empty.
+        """
+        raw = self.translate_to_var.get().strip()
+        if not raw:
+            return None
+        parts = [p.strip() for p in raw.split(",")]
+        codes = []
+        for part in parts:
+            code = _extract_language_code(part)
+            if code:
+                codes.append(code)
+        return ",".join(codes) if codes else None
 
     def get_speaker_names(self):
         """Parse and return speaker names list, or None."""
@@ -437,13 +459,16 @@ class SettingsFrame(ttk.Frame):
         self.vision_workers_var.set(str(settings.get("vision_workers", 4)))
         self.summary_model_var.set(settings.get("summary_model", DEFAULT_SUMMARY_MODEL))
 
-        # Translation settings
+        # Translation settings — handle comma-separated codes like "ar,fr"
         translate_to_val = settings.get("translate_to", "")
         if translate_to_val and "(" not in translate_to_val:
             from ...core.constants import TRANSLATION_CODE_TO_NAME
-            name = TRANSLATION_CODE_TO_NAME.get(translate_to_val)
-            if name:
-                translate_to_val = f"{name} ({translate_to_val})"
+            parts = [p.strip() for p in translate_to_val.split(",") if p.strip()]
+            display_parts = []
+            for code in parts:
+                name = TRANSLATION_CODE_TO_NAME.get(code)
+                display_parts.append(f"{name} ({code})" if name else code)
+            translate_to_val = ", ".join(display_parts)
         self.translate_to_var.set(translate_to_val)
         self.translation_model_var.set(
             settings.get("translation_model", DEFAULT_TRANSLATION_MODEL))
