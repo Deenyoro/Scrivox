@@ -42,6 +42,8 @@ def _setup_bundled_cache():
         # Set HF cache env vars so huggingface_hub finds the pre-downloaded models
         os.environ["HF_HOME"] = models_dir
         os.environ["HF_HUB_CACHE"] = os.path.join(models_dir, "hub")
+        # Force offline mode so pyannote doesn't try to check HF for updates
+        os.environ["HF_HUB_OFFLINE"] = "1"
         return True
     return False
 

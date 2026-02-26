@@ -4,7 +4,16 @@ No args  -> launch GUI (no console window)
 With args -> run CLI (attaches to parent console if available)
 """
 
+import os
 import sys
+
+# PyInstaller console=False builds set sys.stdout/stderr to None.
+# Libraries (pyannote, torch, etc.) crash when they try to print/write.
+# Redirect to devnull so nothing breaks.
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w")
 
 
 def _attach_console():
