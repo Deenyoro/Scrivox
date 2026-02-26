@@ -260,7 +260,7 @@ class SettingsFrame(ttk.Frame):
         translate_langs = [f"{name} ({code})" for name, code in TRANSLATION_LANGUAGES.items()]
         self._translate_to_combo = AutocompleteCombobox(
             row, textvariable=self.translate_to_var,
-            values=translate_langs, state="normal", width=20)
+            values=translate_langs, state="normal", width=20, multi_value=True)
         self._translate_to_combo.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
         ToolTip(self._translate_to_combo, "Target language for translation\n"
                                          "Comma-separated for multiple:\n"
