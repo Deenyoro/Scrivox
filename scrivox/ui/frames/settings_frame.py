@@ -154,8 +154,8 @@ class SettingsFrame(ttk.Frame):
                                             variable=self.translate_var,
                                             command=self._toggle_translate)
             cb_translate.pack(padx=8, pady=(2, 8), anchor=tk.W)
-            ToolTip(cb_translate, "Translate transcript to another language\n"
-                                  "Produces a second output file\nRequires LLM API key")
+            ToolTip(cb_translate, "Translate transcript to one or more languages\n"
+                                  "Produces additional output files\nRequires LLM API key")
 
         if not has_diarization():
             ttk.Label(features_frame,

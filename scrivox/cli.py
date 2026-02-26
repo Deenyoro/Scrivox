@@ -30,11 +30,11 @@ def build_parser():
         epilog="""Examples:
   python main.py meeting.mp3
   python main.py meeting.mp4 --diarize
-  python main.py meeting.mp4 --all
-  python main.py meeting.mp4 --diarize --vision --summarize
+  python main.py meeting.mp4 --all --format md -o minutes.md
   python main.py video.mp4 --diarize --format srt -o subtitles.srt
   python main.py video.mp4 --diarize --speaker-names "Alice,Bob"
-  python main.py meeting.mp4 --all --format md -o minutes.md
+  python main.py meeting.mp3 --translate-to ar,fr,ja --format srt
+  python main.py meeting.mp4 --all --translate-to fr --translate-all
   python main.py video.mp4 --list-tracks
   python main.py video.mp4 --audio-track 1 --language ja
         """,

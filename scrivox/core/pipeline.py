@@ -40,7 +40,7 @@ class PipelineConfig:
     vision: bool = False
     summarize: bool = False
     translate: bool = False
-    translate_to: Optional[str] = None  # target language code e.g. "ar"
+    translate_to: Optional[str] = None  # target language code(s), comma-separated e.g. "ar" or "ar,fr,ja"
     translate_all: bool = False  # also translate summary, vision, headers
     translation_model: str = DEFAULT_TRANSLATION_MODEL
 
