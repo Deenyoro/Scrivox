@@ -90,6 +90,7 @@ class SettingsFrame(ttk.Frame):
 
         # Translation sub-settings
         self.translate_var = tk.BooleanVar(value=False)
+        self.translate_all_var = tk.BooleanVar(value=False)
         self.translate_to_var = tk.StringVar(value="")
         self.translation_model_var = tk.StringVar(value=DEFAULT_TRANSLATION_MODEL)
 
@@ -257,6 +258,13 @@ class SettingsFrame(ttk.Frame):
         self._translate_to_combo.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
         ToolTip(self._translate_to_combo, "Target language for translation")
 
+        cb_all = ttk.Checkbutton(self._translate_frame,
+                                  text="Translate all content",
+                                  variable=self.translate_all_var)
+        cb_all.pack(padx=8, pady=(2, 4), anchor=tk.W)
+        ToolTip(cb_all, "Also translate summary, vision descriptions,\n"
+                        "and document headers (not just transcript)")
+
         row = ttk.Frame(self._translate_frame)
         row.pack(fill=tk.X, padx=8, pady=(2, 4))
         ttk.Label(row, text="Model:").pack(side=tk.LEFT)
@@ -421,6 +429,7 @@ class SettingsFrame(ttk.Frame):
             self.vision_var.set(settings.get("vision", False))
             self.summarize_var.set(settings.get("summarize", False))
             self.translate_var.set(settings.get("translate", False))
+            self.translate_all_var.set(settings.get("translate_all", False))
 
         self.speaker_names_var.set(settings.get("speaker_names", ""))
         self.vision_interval_var.set(str(settings.get("vision_interval", 60)))
@@ -468,6 +477,7 @@ class SettingsFrame(ttk.Frame):
             "vision": self.vision_var.get(),
             "summarize": self.summarize_var.get(),
             "translate": self.translate_var.get(),
+            "translate_all": self.translate_all_var.get(),
             "translate_to": self.translate_to_var.get(),
             "translation_model": self.translation_model_var.get(),
             "num_speakers": self.get_int_or_none(self.num_speakers_var),

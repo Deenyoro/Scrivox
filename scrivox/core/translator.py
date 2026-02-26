@@ -5,6 +5,20 @@ import time
 
 from .llm_client import chat_completion
 
+# Header strings used by the formatter that should be translated
+# when "translate all content" is enabled.
+TRANSLATABLE_HEADERS = [
+    "Meeting Transcript",
+    "Full Transcript",
+    "FULL TRANSCRIPT",
+    "File",
+    "Duration",
+    "Model",
+    "Language",
+    "Speakers",
+    "SCREEN",
+]
+
 
 def _parse_numbered_lines(response_text, expected_count):
     """Parse numbered-line response back into a list of strings.
@@ -171,3 +185,100 @@ def translate_segments(segments, target_language, api_key, translation_model,
     elapsed = time.time() - t0
     on_progress(f"Translation complete in {elapsed:.1f}s")
     return translated
+
+
+def translate_text(text, target_language, api_key, translation_model,
+                   source_language=None, api_base=None, on_progress=print):
+    """Translate a block of text (e.g. meeting summary) preserving markdown structure.
+
+    Returns translated text, or original text on failure.
+    """
+    if not text:
+        return text
+
+    from .constants import LLM_PROVIDERS, DEFAULT_LLM_PROVIDER
+    url = api_base or LLM_PROVIDERS[DEFAULT_LLM_PROVIDER]
+
+    source_hint = f" from {source_language}" if source_language else ""
+    prompt = (
+        f"Translate the following text{source_hint} to {target_language}. "
+        f"Preserve all markdown formatting, headers, bullet points, and structure exactly. "
+        f"Do not add explanations or notes. Translate ONLY the text content.\n\n"
+        f"{text}"
+    )
+
+    input_chars = len(text)
+    max_tokens = min(max(4096, input_chars * 3 // 4), 16384)
+
+    messages = [{"role": "user", "content": prompt}]
+    result = chat_completion(
+        messages=messages,
+        model=translation_model,
+        api_key=api_key,
+        api_base=url,
+        max_tokens=max_tokens,
+        temperature=0.3,
+        max_retries=3,
+        timeout=120,
+    )
+
+    if result and not result.startswith("["):
+        return result
+
+    on_progress(f"  Warning: Text translation failed: {result}")
+    return text  # fallback to original
+
+
+def translate_strings(strings, target_language, api_key, translation_model,
+                      source_language=None, api_base=None, batch_size=25,
+                      on_progress=print):
+    """Translate a list of short strings. Returns list of translated strings.
+
+    Falls back to originals on failure.
+    """
+    if not strings:
+        return strings
+
+    from .constants import LLM_PROVIDERS, DEFAULT_LLM_PROVIDER
+    url = api_base or LLM_PROVIDERS[DEFAULT_LLM_PROVIDER]
+
+    results = []
+    total_batches = (len(strings) + batch_size - 1) // batch_size
+
+    for batch_idx in range(total_batches):
+        start = batch_idx * batch_size
+        end = min(start + batch_size, len(strings))
+        batch = strings[start:end]
+
+        numbered_lines = [f"{i + 1}: {s}" for i, s in enumerate(batch)]
+        numbered_text = "\n".join(numbered_lines)
+
+        source_hint = f" from {source_language}" if source_language else ""
+        prompt = (
+            f"Translate the following numbered lines{source_hint} to {target_language}. "
+            f"Return ONLY the translated lines in the exact same numbered format. "
+            f"Preserve the numbering exactly (1:, 2:, etc). "
+            f"Do not add explanations, notes, or extra text.\n\n"
+            f"{numbered_text}"
+        )
+
+        messages = [{"role": "user", "content": prompt}]
+        result = chat_completion(
+            messages=messages,
+            model=translation_model,
+            api_key=api_key,
+            api_base=url,
+            max_tokens=4096,
+            temperature=0.3,
+            max_retries=3,
+            timeout=60,
+        )
+
+        if result and not result.startswith("["):
+            batch_results = _parse_numbered_lines(result, len(batch))
+            results.extend(batch_results)
+        else:
+            on_progress(f"  Warning: String translation failed: {result}")
+            results.extend(batch)  # fallback to originals
+
+    return results

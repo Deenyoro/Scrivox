@@ -221,7 +221,8 @@ def _wrap_subtitle_text(text, max_line=42):
 def format_output(segments, fmt="txt", diarized=False, visual_context=None,
                   summary=None, metadata=None, subtitle_speakers=False,
                   subtitle_max_chars=84, subtitle_max_duration=4.0,
-                  subtitle_max_gap=0.8, subtitle_min_chars=15):
+                  subtitle_max_gap=0.8, subtitle_min_chars=15,
+                  header_overrides=None):
     """Format transcript segments into the requested output format.
 
     Args:
@@ -235,24 +236,27 @@ def format_output(segments, fmt="txt", diarized=False, visual_context=None,
         subtitle_max_chars: Max characters per subtitle cue
         subtitle_max_duration: Max seconds per subtitle cue
         subtitle_max_gap: Max gap in seconds to merge across
+        header_overrides: Optional dict mapping header strings to translated versions
     """
+    h = header_overrides or {}
     lines = []
 
     if fmt == "txt":
         if summary:
             lines.append(summary)
             lines.append("\n" + "=" * 60)
-            lines.append("  FULL TRANSCRIPT")
+            lines.append(f"  {h.get('FULL TRANSCRIPT', 'FULL TRANSCRIPT')}")
             lines.append("=" * 60 + "\n")
 
         vis_idx = 0
         vis = visual_context or []
         current_speaker = None
+        screen_label = h.get("SCREEN", "SCREEN")
 
         for seg in segments:
             while vis_idx < len(vis) and vis[vis_idx]["timestamp"] <= seg["start"]:
                 ts = format_timestamp_human(vis[vis_idx]["timestamp"])
-                lines.append(f"\n--- [{ts}] SCREEN: {vis[vis_idx]['description']} ---\n")
+                lines.append(f"\n--- [{ts}] {screen_label}: {vis[vis_idx]['description']} ---\n")
                 vis_idx += 1
 
             ts = format_timestamp_human(seg["start"])
@@ -266,7 +270,7 @@ def format_output(segments, fmt="txt", diarized=False, visual_context=None,
 
         while vis_idx < len(vis):
             ts = format_timestamp_human(vis[vis_idx]["timestamp"])
-            lines.append(f"\n--- [{ts}] SCREEN: {vis[vis_idx]['description']} ---\n")
+            lines.append(f"\n--- [{ts}] {screen_label}: {vis[vis_idx]['description']} ---\n")
             vis_idx += 1
 
         return "\n".join(lines).strip()
@@ -275,17 +279,17 @@ def format_output(segments, fmt="txt", diarized=False, visual_context=None,
         if metadata:
             duration = metadata.get("duration_seconds")
             duration_str = format_timestamp_human(duration) if duration else "unknown"
-            lines.append("# Meeting Transcript")
+            lines.append(f"# {h.get('Meeting Transcript', 'Meeting Transcript')}")
             lines.append("")
-            lines.append(f"- **File:** {metadata.get('input_file', 'unknown')}")
-            lines.append(f"- **Duration:** {duration_str}")
-            lines.append(f"- **Model:** {metadata.get('model', 'unknown')}")
-            lines.append(f"- **Language:** {metadata.get('language', 'unknown')}")
+            lines.append(f"- **{h.get('File', 'File')}:** {metadata.get('input_file', 'unknown')}")
+            lines.append(f"- **{h.get('Duration', 'Duration')}:** {duration_str}")
+            lines.append(f"- **{h.get('Model', 'Model')}:** {metadata.get('model', 'unknown')}")
+            lines.append(f"- **{h.get('Language', 'Language')}:** {metadata.get('language', 'unknown')}")
             if diarized:
                 speakers = set(seg.get("speaker", "") for seg in segments)
                 speakers.discard("")
                 speakers.discard("UNKNOWN")
-                lines.append(f"- **Speakers:** {', '.join(sorted(speakers)) if speakers else 'unknown'}")
+                lines.append(f"- **{h.get('Speakers', 'Speakers')}:** {', '.join(sorted(speakers)) if speakers else 'unknown'}")
             lines.append("")
 
         if summary:
@@ -295,7 +299,7 @@ def format_output(segments, fmt="txt", diarized=False, visual_context=None,
             lines.append("")
             lines.append("---")
             lines.append("")
-            lines.append("## Full Transcript")
+            lines.append(f"## {h.get('Full Transcript', 'Full Transcript')}")
             lines.append("")
 
         vis_idx = 0

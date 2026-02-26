@@ -1,5 +1,6 @@
 """Pipeline orchestrator: PipelineConfig dataclass + TranscriptionPipeline."""
 
+import copy
 import json
 import os
 import shutil
@@ -21,7 +22,9 @@ from .transcriber import clean_transcription, transcribe_audio
 from .diarizer import assign_speakers, diarize_audio, rename_speakers, _get_bundled_models_dir
 from .vision import analyze_keyframes, extract_keyframes
 from .summarizer import generate_meeting_summary
-from .translator import translate_segments
+from .translator import (
+    translate_segments, translate_strings, translate_text, TRANSLATABLE_HEADERS,
+)
 from .formatter import format_output, format_timestamp_human
 
 
@@ -38,6 +41,7 @@ class PipelineConfig:
     summarize: bool = False
     translate: bool = False
     translate_to: Optional[str] = None  # target language code e.g. "ar"
+    translate_all: bool = False  # also translate summary, vision, headers
     translation_model: str = DEFAULT_TRANSLATION_MODEL
 
     # Diarization
@@ -397,6 +401,9 @@ class TranscriptionPipeline:
 
         # Step 5: Translate
         translated_segments = None
+        translated_summary = None
+        translated_visual_context = None
+        translated_headers = None
         if cfg.translate and cfg.translate_to:
             self._check_cancel()
             current_step += 1
@@ -405,11 +412,41 @@ class TranscriptionPipeline:
             self.on_progress("")
 
             source_name = LANGUAGE_CODE_TO_NAME.get(detected_lang, detected_lang) if detected_lang else None
-            translated_segments = translate_segments(
-                segments, target_name, openrouter_key, cfg.translation_model,
-                source_language=source_name, api_base=cfg.api_base,
-                on_progress=self.on_progress, cancel_event=self._cancel,
+            _tr_kwargs = dict(
+                target_language=target_name,
+                api_key=openrouter_key,
+                translation_model=cfg.translation_model,
+                source_language=source_name,
+                api_base=cfg.api_base,
+                on_progress=self.on_progress,
             )
+            translated_segments = translate_segments(
+                segments, cancel_event=self._cancel, **_tr_kwargs,
+            )
+
+            # Translate all content (summary, vision descriptions, headers)
+            if cfg.translate_all:
+                self._check_cancel()
+                if summary:
+                    self.on_progress("  Translating summary...")
+                    translated_summary = translate_text(summary, **_tr_kwargs)
+
+                if visual_context:
+                    self._check_cancel()
+                    self.on_progress("  Translating visual descriptions...")
+                    descs = [vc["description"] for vc in visual_context]
+                    translated_descs = translate_strings(descs, **_tr_kwargs)
+                    translated_visual_context = copy.deepcopy(visual_context)
+                    for i, vc in enumerate(translated_visual_context):
+                        if i < len(translated_descs):
+                            vc["description"] = translated_descs[i]
+
+                self._check_cancel()
+                self.on_progress("  Translating headers...")
+                header_translations = translate_strings(
+                    TRANSLATABLE_HEADERS, **_tr_kwargs,
+                )
+                translated_headers = dict(zip(TRANSLATABLE_HEADERS, header_translations))
 
         self._check_cancel()
 
@@ -450,14 +487,15 @@ class TranscriptionPipeline:
             translated_output_text = format_output(
                 translated_segments, cfg.output_format,
                 diarized=cfg.diarize,
-                visual_context=visual_context,
-                summary=summary,
+                visual_context=translated_visual_context or visual_context,
+                summary=translated_summary or summary,
                 metadata=metadata,
                 subtitle_speakers=cfg.subtitle_speakers,
                 subtitle_max_chars=cfg.subtitle_max_chars,
                 subtitle_max_duration=cfg.subtitle_max_duration,
                 subtitle_max_gap=cfg.subtitle_max_gap,
                 subtitle_min_chars=cfg.subtitle_min_chars,
+                header_overrides=translated_headers,
             )
 
         total_elapsed = time.time() - total_t0

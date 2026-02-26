@@ -86,6 +86,9 @@ def build_parser():
     translate_group.add_argument("--translate-to", default=None,
                                  help="Translate transcript to target language code (e.g. 'ar', 'fr', 'ja'). "
                                       "Produces a second output file with the translation.")
+    translate_group.add_argument("--translate-all", action="store_true",
+                                 help="Also translate summary, vision descriptions, and document headers "
+                                      "(not just transcript segments)")
     translate_group.add_argument("--translation-model", default=DEFAULT_TRANSLATION_MODEL,
                                  help=f"LLM model for translation (default: {DEFAULT_TRANSLATION_MODEL})")
 
@@ -257,6 +260,7 @@ def run_cli(argv=None):
         vision_workers=args.vision_workers,
         summary_model=args.summary_model,
         translate=bool(args.translate_to),
+        translate_all=args.translate_all,
         translate_to=args.translate_to,
         translation_model=args.translation_model,
         output_format=args.format,

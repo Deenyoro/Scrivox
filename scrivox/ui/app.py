@@ -389,6 +389,7 @@ class ScrivoxApp(tk.Tk):
             vision_workers=s._safe_int(s.vision_workers_var.get(), 4),
             summary_model=s.summary_model_var.get(),
             translate=s.translate_var.get(),
+            translate_all=s.translate_all_var.get(),
             translate_to=s.get_translate_to_code(),
             translation_model=s.translation_model_var.get(),
             output_format=self.output_frame.format_var.get(),

@@ -62,6 +62,7 @@ _DEFAULT_CONFIG = {
         "subtitle_min_chars": 15,
         "confidence_threshold": 0.50,
         "translate": False,
+        "translate_all": False,
         "translate_to": "",
         "translation_model": "google/gemini-2.5-flash",
     },
