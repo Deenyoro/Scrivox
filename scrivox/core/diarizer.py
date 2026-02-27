@@ -58,18 +58,13 @@ def _setup_bundled_cache():
 def _force_hf_cache_and_offline():
     """Force huggingface_hub AND pyannote to use bundled cache paths.
 
-    Two separate cache systems are at play:
-
-    1. huggingface_hub: reads HF_HUB_OFFLINE / HF_HUB_CACHE at import time
-       and caches them as module constants.
-
-    2. pyannote: reads PYANNOTE_CACHE at import time into its own CACHE_DIR
-       constant (defaults to ~/.cache/torch/pyannote). Model.from_pretrained()
-       passes CACHE_DIR to hf_hub_download(cache_dir=...), OVERRIDING whatever
-       HF_HUB_CACHE is set to.
-
-    features.py imports pyannote at app startup, so both sets of constants
-    are cached with wrong defaults before diarize_audio() runs.
+    Python captures default parameter values at function DEFINITION time.
+    Both Model.from_pretrained(cache_dir=CACHE_DIR) and
+    Pipeline.from_pretrained(cache_dir=CACHE_DIR) baked the old
+    ~/.cache/torch/pyannote path into their __defaults__ tuple when the
+    class was first imported (triggered by features.py at app startup).
+    Patching the module attribute has no effect — we must rewrite the
+    function's __defaults__ directly.
     """
     models_dir = _get_bundled_models_dir()
     if not models_dir:
@@ -77,7 +72,18 @@ def _force_hf_cache_and_offline():
 
     hub_dir = os.path.join(models_dir, "hub")
 
-    # ── Patch pyannote's CACHE_DIR (the actual root cause) ──
+    # ── Patch from_pretrained __defaults__ (the actual root cause) ──
+    # cache_dir is the last positional default in both methods.
+    from pyannote.audio.core.model import Model
+    from pyannote.audio.core.pipeline import Pipeline as PAPipeline
+
+    for cls in (Model, PAPipeline):
+        func = cls.from_pretrained.__func__
+        defaults = list(func.__defaults__)
+        defaults[-1] = hub_dir
+        func.__defaults__ = tuple(defaults)
+
+    # ── Patch module-level CACHE_DIR for any inline usage ──
     for mod_name in (
         'pyannote.audio.core.model',
         'pyannote.audio.core.pipeline',
@@ -87,14 +93,11 @@ def _force_hf_cache_and_offline():
         if mod and hasattr(mod, 'CACHE_DIR'):
             mod.CACHE_DIR = hub_dir
 
-    # ── Patch huggingface_hub constants (belt and suspenders) ──
+    # ── Patch huggingface_hub constants ──
     try:
         import huggingface_hub.constants
         huggingface_hub.constants.HF_HUB_OFFLINE = True
-        huggingface_hub.constants.HF_HOME = models_dir
         huggingface_hub.constants.HF_HUB_CACHE = hub_dir
-        if hasattr(huggingface_hub.constants, 'HUGGINGFACE_HUB_CACHE'):
-            huggingface_hub.constants.HUGGINGFACE_HUB_CACHE = hub_dir
     except ImportError:
         return
 
@@ -106,10 +109,6 @@ def _force_hf_cache_and_offline():
                 mod.HF_HUB_OFFLINE = True
             if hasattr(mod, 'HF_HUB_CACHE'):
                 mod.HF_HUB_CACHE = hub_dir
-            if hasattr(mod, 'HF_HOME'):
-                mod.HF_HOME = models_dir
-            if hasattr(mod, 'HUGGINGFACE_HUB_CACHE'):
-                mod.HUGGINGFACE_HUB_CACHE = hub_dir
 
 
 def diarize_audio(audio_path, hf_token, num_speakers=None, min_speakers=None,
