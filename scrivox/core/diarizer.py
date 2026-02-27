@@ -42,9 +42,13 @@ def _setup_bundled_cache():
     """
     models_dir = _get_bundled_models_dir()
     if models_dir:
-        # Set HF cache env vars so huggingface_hub finds the pre-downloaded models
+        hub_dir = os.path.join(models_dir, "hub")
+        # HuggingFace Hub cache — where hf_hub_download looks by default
         os.environ["HF_HOME"] = models_dir
-        os.environ["HF_HUB_CACHE"] = os.path.join(models_dir, "hub")
+        os.environ["HF_HUB_CACHE"] = hub_dir
+        # Pyannote's own cache — Model.from_pretrained and Pipeline.from_pretrained
+        # pass this to hf_hub_download(cache_dir=CACHE_DIR), overriding HF_HUB_CACHE
+        os.environ["PYANNOTE_CACHE"] = hub_dir
         # Force offline mode so pyannote doesn't try to access HuggingFace
         os.environ["HF_HUB_OFFLINE"] = "1"
         return True
@@ -52,17 +56,20 @@ def _setup_bundled_cache():
 
 
 def _force_hf_cache_and_offline():
-    """Force huggingface_hub to use bundled cache paths and offline mode.
+    """Force huggingface_hub AND pyannote to use bundled cache paths.
 
-    huggingface_hub reads HF_HUB_OFFLINE, HF_HOME, and HF_HUB_CACHE once at
-    import time into module-level constants. Sub-modules copy them via
-    `from .constants import ...`, creating local bindings that are never
-    updated by later os.environ changes.
+    Two separate cache systems are at play:
 
-    features.py imports pyannote.audio at app startup (to detect build variant),
-    which triggers huggingface_hub to cache the default ~/.cache/huggingface
-    paths long before diarize_audio() runs. We must patch every module that
-    cached the old values.
+    1. huggingface_hub: reads HF_HUB_OFFLINE / HF_HUB_CACHE at import time
+       and caches them as module constants.
+
+    2. pyannote: reads PYANNOTE_CACHE at import time into its own CACHE_DIR
+       constant (defaults to ~/.cache/torch/pyannote). Model.from_pretrained()
+       passes CACHE_DIR to hf_hub_download(cache_dir=...), OVERRIDING whatever
+       HF_HUB_CACHE is set to.
+
+    features.py imports pyannote at app startup, so both sets of constants
+    are cached with wrong defaults before diarize_audio() runs.
     """
     models_dir = _get_bundled_models_dir()
     if not models_dir:
@@ -70,19 +77,27 @@ def _force_hf_cache_and_offline():
 
     hub_dir = os.path.join(models_dir, "hub")
 
+    # ── Patch pyannote's CACHE_DIR (the actual root cause) ──
+    for mod_name in (
+        'pyannote.audio.core.model',
+        'pyannote.audio.core.pipeline',
+        'pyannote.audio.pipelines.speaker_verification',
+    ):
+        mod = sys.modules.get(mod_name)
+        if mod and hasattr(mod, 'CACHE_DIR'):
+            mod.CACHE_DIR = hub_dir
+
+    # ── Patch huggingface_hub constants (belt and suspenders) ──
     try:
         import huggingface_hub.constants
+        huggingface_hub.constants.HF_HUB_OFFLINE = True
+        huggingface_hub.constants.HF_HOME = models_dir
+        huggingface_hub.constants.HF_HUB_CACHE = hub_dir
+        if hasattr(huggingface_hub.constants, 'HUGGINGFACE_HUB_CACHE'):
+            huggingface_hub.constants.HUGGINGFACE_HUB_CACHE = hub_dir
     except ImportError:
         return
 
-    # Patch the constants module directly
-    huggingface_hub.constants.HF_HUB_OFFLINE = True
-    huggingface_hub.constants.HF_HOME = models_dir
-    huggingface_hub.constants.HF_HUB_CACHE = hub_dir
-    if hasattr(huggingface_hub.constants, 'HUGGINGFACE_HUB_CACHE'):
-        huggingface_hub.constants.HUGGINGFACE_HUB_CACHE = hub_dir
-
-    # Patch all sub-modules that imported these constants locally
     for mod in sys.modules.values():
         if (mod is not None
                 and getattr(mod, '__package__', None)
