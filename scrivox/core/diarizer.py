@@ -35,6 +35,9 @@ def _get_bundled_models_dir():
 def _setup_bundled_cache():
     """Point HuggingFace Hub cache to bundled models directory if available.
 
+    MUST be called BEFORE importing pyannote.audio — huggingface_hub reads
+    HF_HUB_OFFLINE at import time and caches it as a module-level constant.
+
     Returns True if bundled models were found and configured.
     """
     models_dir = _get_bundled_models_dir()
@@ -42,10 +45,32 @@ def _setup_bundled_cache():
         # Set HF cache env vars so huggingface_hub finds the pre-downloaded models
         os.environ["HF_HOME"] = models_dir
         os.environ["HF_HUB_CACHE"] = os.path.join(models_dir, "hub")
-        # Force offline mode so pyannote doesn't try to check HF for updates
+        # Force offline mode so pyannote doesn't try to access HuggingFace
         os.environ["HF_HUB_OFFLINE"] = "1"
         return True
     return False
+
+
+def _force_hf_offline():
+    """Force huggingface_hub into offline mode even if already imported.
+
+    huggingface_hub reads HF_HUB_OFFLINE once at import time into a module
+    constant. Sub-modules copy it via `from .constants import HF_HUB_OFFLINE`,
+    creating local bindings that aren't updated by os.environ changes.
+    We must patch every module that cached the old value.
+    """
+    try:
+        import huggingface_hub.constants
+        huggingface_hub.constants.HF_HUB_OFFLINE = True
+    except ImportError:
+        return
+
+    for mod in sys.modules.values():
+        if (mod is not None
+                and getattr(mod, '__package__', None)
+                and getattr(mod, '__package__', '').startswith('huggingface_hub')
+                and hasattr(mod, 'HF_HUB_OFFLINE')):
+            mod.HF_HUB_OFFLINE = True
 
 
 def diarize_audio(audio_path, hf_token, num_speakers=None, min_speakers=None,
@@ -56,11 +81,23 @@ def diarize_audio(audio_path, hf_token, num_speakers=None, min_speakers=None,
     If bundled models are found in a 'models/' directory next to the exe,
     they are used directly and no HF token is needed for download.
     """
-    from pyannote.audio import Pipeline
     from .constants import DEFAULT_DIARIZATION_MODEL
 
     if not diarization_model:
         diarization_model = DEFAULT_DIARIZATION_MODEL
+
+    # MUST set up bundled cache BEFORE importing pyannote.audio —
+    # that import triggers huggingface_hub which reads HF_HUB_OFFLINE
+    # env var at import time and caches it as a module constant.
+    has_bundled = _setup_bundled_cache()
+
+    from pyannote.audio import Pipeline
+
+    # Force-patch all huggingface_hub modules that cached the offline
+    # constant (covers case where huggingface_hub was already imported
+    # before _setup_bundled_cache set the env var)
+    if has_bundled:
+        _force_hf_offline()
 
     wav_path = None
     ext = os.path.splitext(audio_path)[1].lower()
@@ -72,8 +109,6 @@ def diarize_audio(audio_path, hf_token, num_speakers=None, min_speakers=None,
         diarize_input = audio_path
 
     try:
-        # Check for bundled models
-        has_bundled = _setup_bundled_cache()
         if has_bundled:
             on_progress("Using bundled diarization models...")
         else:

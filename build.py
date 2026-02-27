@@ -51,11 +51,15 @@ def download_diarization_models(models_dir):
     os.environ["HF_HOME"] = models_dir
     os.environ["HF_HUB_CACHE"] = hub_dir
 
-    # Model repos match defaults in scrivox/core/constants.py
+    # Model repos: main pipeline + all sub-models it references.
+    # speaker-diarization-3.1 config references segmentation-3.0 and
+    # wespeaker-voxceleb-resnet34-LM internally — both must be cached
+    # or the pipeline will try to download them at runtime.
     model_repos = [
-        "pyannote/speaker-diarization-3.1",   # DEFAULT_DIARIZATION_MODEL
-        "pyannote/segmentation-3.0",           # DEFAULT_SEGMENTATION_MODEL
-        "speechbrain/spkrec-ecapa-voxceleb",   # DEFAULT_SPEAKER_EMBEDDING_MODEL
+        "pyannote/speaker-diarization-3.1",        # main pipeline config
+        "pyannote/segmentation-3.0",                # segmentation sub-model
+        "pyannote/wespeaker-voxceleb-resnet34-LM",  # embedding sub-model (used by 3.1)
+        "speechbrain/spkrec-ecapa-voxceleb",        # legacy embedding (kept for compat)
     ]
 
     try:
