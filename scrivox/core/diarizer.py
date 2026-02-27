@@ -51,26 +51,50 @@ def _setup_bundled_cache():
     return False
 
 
-def _force_hf_offline():
-    """Force huggingface_hub into offline mode even if already imported.
+def _force_hf_cache_and_offline():
+    """Force huggingface_hub to use bundled cache paths and offline mode.
 
-    huggingface_hub reads HF_HUB_OFFLINE once at import time into a module
-    constant. Sub-modules copy it via `from .constants import HF_HUB_OFFLINE`,
-    creating local bindings that aren't updated by os.environ changes.
-    We must patch every module that cached the old value.
+    huggingface_hub reads HF_HUB_OFFLINE, HF_HOME, and HF_HUB_CACHE once at
+    import time into module-level constants. Sub-modules copy them via
+    `from .constants import ...`, creating local bindings that are never
+    updated by later os.environ changes.
+
+    features.py imports pyannote.audio at app startup (to detect build variant),
+    which triggers huggingface_hub to cache the default ~/.cache/huggingface
+    paths long before diarize_audio() runs. We must patch every module that
+    cached the old values.
     """
+    models_dir = _get_bundled_models_dir()
+    if not models_dir:
+        return
+
+    hub_dir = os.path.join(models_dir, "hub")
+
     try:
         import huggingface_hub.constants
-        huggingface_hub.constants.HF_HUB_OFFLINE = True
     except ImportError:
         return
 
+    # Patch the constants module directly
+    huggingface_hub.constants.HF_HUB_OFFLINE = True
+    huggingface_hub.constants.HF_HOME = models_dir
+    huggingface_hub.constants.HF_HUB_CACHE = hub_dir
+    if hasattr(huggingface_hub.constants, 'HUGGINGFACE_HUB_CACHE'):
+        huggingface_hub.constants.HUGGINGFACE_HUB_CACHE = hub_dir
+
+    # Patch all sub-modules that imported these constants locally
     for mod in sys.modules.values():
         if (mod is not None
                 and getattr(mod, '__package__', None)
-                and getattr(mod, '__package__', '').startswith('huggingface_hub')
-                and hasattr(mod, 'HF_HUB_OFFLINE')):
-            mod.HF_HUB_OFFLINE = True
+                and getattr(mod, '__package__', '').startswith('huggingface_hub')):
+            if hasattr(mod, 'HF_HUB_OFFLINE'):
+                mod.HF_HUB_OFFLINE = True
+            if hasattr(mod, 'HF_HUB_CACHE'):
+                mod.HF_HUB_CACHE = hub_dir
+            if hasattr(mod, 'HF_HOME'):
+                mod.HF_HOME = models_dir
+            if hasattr(mod, 'HUGGINGFACE_HUB_CACHE'):
+                mod.HUGGINGFACE_HUB_CACHE = hub_dir
 
 
 def diarize_audio(audio_path, hf_token, num_speakers=None, min_speakers=None,
@@ -86,18 +110,18 @@ def diarize_audio(audio_path, hf_token, num_speakers=None, min_speakers=None,
     if not diarization_model:
         diarization_model = DEFAULT_DIARIZATION_MODEL
 
-    # MUST set up bundled cache BEFORE importing pyannote.audio —
-    # that import triggers huggingface_hub which reads HF_HUB_OFFLINE
-    # env var at import time and caches it as a module constant.
+    # Set env vars BEFORE importing pyannote — but features.py may have
+    # already imported pyannote (and huggingface_hub) at app startup,
+    # so env vars alone are not enough.
     has_bundled = _setup_bundled_cache()
 
     from pyannote.audio import Pipeline
 
-    # Force-patch all huggingface_hub modules that cached the offline
-    # constant (covers case where huggingface_hub was already imported
-    # before _setup_bundled_cache set the env var)
+    # Force-patch ALL cached huggingface_hub constants: offline flag,
+    # HF_HOME, and HF_HUB_CACHE. These were cached at import time
+    # (triggered by features.py) pointing to ~/.cache/huggingface.
     if has_bundled:
-        _force_hf_offline()
+        _force_hf_cache_and_offline()
 
     wav_path = None
     ext = os.path.splitext(audio_path)[1].lower()
@@ -117,8 +141,13 @@ def diarize_audio(audio_path, hf_token, num_speakers=None, min_speakers=None,
         on_progress(f"Loading {diarization_model} on CUDA...")
         with _allow_unsafe_torch_load():
             if has_bundled:
-                # Bundled models — load from local cache, no token needed
-                pipeline = Pipeline.from_pretrained(diarization_model)
+                # Bundled models — load from local cache, no token needed.
+                # Pass cache_dir explicitly so pyannote looks in the right
+                # place even if huggingface_hub constants weren't fully patched.
+                bundled_hub = os.path.join(_get_bundled_models_dir(), "hub")
+                pipeline = Pipeline.from_pretrained(
+                    diarization_model, cache_dir=bundled_hub,
+                )
             else:
                 # Download from HF Hub — needs token
                 # pyannote >= 3.3 uses 'token'; older versions use 'use_auth_token'
