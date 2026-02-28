@@ -6,6 +6,7 @@ import threading
 import time
 
 import torch
+import torchaudio
 
 from .torch_compat import _allow_unsafe_torch_load
 from .media import extract_wav
@@ -115,9 +116,14 @@ def diarize_audio(audio_path, hf_token, num_speakers=None, min_speakers=None,
     if ext not in (".wav", ".wave"):
         wav_path = extract_wav(audio_path, track_index=audio_track,
                                on_progress=on_progress)
-        diarize_input = wav_path
+        wav_file = wav_path
     else:
-        diarize_input = audio_path
+        wav_file = audio_path
+
+    # Pre-load audio as a waveform tensor so pyannote never touches
+    # torchcodec's AudioDecoder (broken on Windows / PyInstaller).
+    waveform, sample_rate = torchaudio.load(wav_file)
+    diarize_input = {"waveform": waveform, "sample_rate": sample_rate}
 
     try:
         if has_bundled:
@@ -158,7 +164,7 @@ def diarize_audio(audio_path, hf_token, num_speakers=None, min_speakers=None,
         ticker.start()
 
         try:
-            diarization = pipeline(
+            result = pipeline(
                 diarize_input,
                 num_speakers=num_speakers,
                 min_speakers=min_speakers,
@@ -168,8 +174,18 @@ def diarize_audio(audio_path, hf_token, num_speakers=None, min_speakers=None,
             stop_progress.set()
             ticker.join(timeout=5)
 
+        # pyannote 4.0 returns DiarizeOutput; use exclusive_speaker_diarization
+        # (no overlapping speech) for cleaner transcription alignment.
+        # Fall back to the result itself for pyannote 3.x Annotation objects.
+        if hasattr(result, "exclusive_speaker_diarization"):
+            annotation = result.exclusive_speaker_diarization
+        elif hasattr(result, "speaker_diarization"):
+            annotation = result.speaker_diarization
+        else:
+            annotation = result
+
         speaker_segments = []
-        for turn, _, speaker in diarization.itertracks(yield_label=True):
+        for turn, _, speaker in annotation.itertracks(yield_label=True):
             speaker_segments.append({
                 "start": turn.start,
                 "end": turn.end,
