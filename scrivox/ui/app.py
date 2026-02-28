@@ -379,7 +379,7 @@ class ScrivoxApp(tk.Tk):
             vision=s.vision_var.get(),
             summarize=s.summarize_var.get(),
             diarization_model=(self.models_frame.get_diarization_model()
-                               if self.models_frame else "pyannote/speaker-diarization-3.1"),
+                               if self.models_frame else "pyannote/speaker-diarization-community-1"),
             num_speakers=s.get_int_or_none(s.num_speakers_var),
             min_speakers=s.get_int_or_none(s.min_speakers_var),
             max_speakers=s.get_int_or_none(s.max_speakers_var),

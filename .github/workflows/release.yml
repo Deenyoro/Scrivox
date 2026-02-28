@@ -20,21 +20,21 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
-      - name: Install PyTorch with CUDA 12.4
-        run: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
+      - name: Install PyTorch with CUDA 12.6
+        run: pip install torch torchaudio torchcodec --index-url https://download.pytorch.org/whl/cu126
 
       - name: Install dependencies
         run: pip install -r requirements.txt pyinstaller
 
       - name: Force CUDA torch (prevent PyPI CPU override from transitive deps)
-        run: pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124 --force-reinstall --no-deps
+        run: pip install torch torchaudio torchcodec --index-url https://download.pytorch.org/whl/cu126 --force-reinstall --no-deps
 
       - name: Verify CUDA torch and DLLs
         shell: bash

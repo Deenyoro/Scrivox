@@ -54,7 +54,7 @@ _DEFAULT_CONFIG = {
         "vision_model": "google/gemini-2.5-flash",
         "vision_workers": 4,
         "summary_model": "google/gemini-2.5-flash",
-        "diarization_model": "pyannote/speaker-diarization-3.1",
+        "diarization_model": "pyannote/speaker-diarization-community-1",
         "use_system_cuda": False,
         "subtitle_max_chars": 84,
         "subtitle_max_duration": 4.0,

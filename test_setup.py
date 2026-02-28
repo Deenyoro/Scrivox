@@ -116,7 +116,7 @@ if hf_token:
     try:
         from pyannote.audio import Pipeline
         with _allow_unsafe_torch_load():
-            pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-3.1", use_auth_token=hf_token)
+            pipeline = Pipeline.from_pretrained("pyannote/speaker-diarization-community-1", token=hf_token)
         pipeline.to(torch.device("cuda"))
         print(f"  [OK] Diarization pipeline loaded on GPU")
         del pipeline

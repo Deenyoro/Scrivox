@@ -51,15 +51,10 @@ def download_diarization_models(models_dir):
     os.environ["HF_HOME"] = models_dir
     os.environ["HF_HUB_CACHE"] = hub_dir
 
-    # Model repos: main pipeline + all sub-models it references.
-    # speaker-diarization-3.1 config references segmentation-3.0 and
-    # wespeaker-voxceleb-resnet34-LM internally — both must be cached
-    # or the pipeline will try to download them at runtime.
+    # Model repos: community-1 is self-contained (segmentation + embedding + PLDA
+    # are bundled as subfolders), so only one repo is needed.
     model_repos = [
-        "pyannote/speaker-diarization-3.1",        # main pipeline config
-        "pyannote/segmentation-3.0",                # segmentation sub-model
-        "pyannote/wespeaker-voxceleb-resnet34-LM",  # embedding sub-model (used by 3.1)
-        "speechbrain/spkrec-ecapa-voxceleb",        # legacy embedding (kept for compat)
+        "pyannote/speaker-diarization-community-1",  # self-contained: segmentation + embedding + plda
     ]
 
     try:
