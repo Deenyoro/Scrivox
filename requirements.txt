@@ -1,5 +1,5 @@
 faster-whisper>=1.0.0
-pyannote.audio>=3.1,<4.0
+pyannote.audio>=4,<4.1
 numpy
 sounddevice
 pynput
