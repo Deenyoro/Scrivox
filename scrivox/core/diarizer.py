@@ -2,10 +2,12 @@
 
 import os
 import sys
+import tempfile
 import threading
 import time
 
 import torch
+import yaml
 
 from .torch_compat import _allow_unsafe_torch_load
 from .media import extract_wav
@@ -35,80 +37,78 @@ def _get_bundled_models_dir():
 def _setup_bundled_cache():
     """Point HuggingFace Hub cache to bundled models directory if available.
 
-    MUST be called BEFORE importing pyannote.audio — huggingface_hub reads
-    HF_HUB_OFFLINE at import time and caches it as a module-level constant.
+    Sets env vars as a safety net to discourage any HF code from going online.
+    The actual model loading bypasses HF Hub entirely via local path resolution.
 
     Returns True if bundled models were found and configured.
     """
     models_dir = _get_bundled_models_dir()
     if models_dir:
         hub_dir = os.path.join(models_dir, "hub")
-        # HuggingFace Hub cache — where hf_hub_download looks by default
         os.environ["HF_HOME"] = models_dir
         os.environ["HF_HUB_CACHE"] = hub_dir
-        # Pyannote's own cache — Model.from_pretrained and Pipeline.from_pretrained
-        # pass this to hf_hub_download(cache_dir=CACHE_DIR), overriding HF_HUB_CACHE
         os.environ["PYANNOTE_CACHE"] = hub_dir
-        # Force offline mode so pyannote doesn't try to access HuggingFace
         os.environ["HF_HUB_OFFLINE"] = "1"
         return True
     return False
 
 
-def _force_hf_cache_and_offline():
-    """Force huggingface_hub AND pyannote to use bundled cache paths.
+def _resolve_snapshot(model_id, hub_dir):
+    """Resolve a HuggingFace model ID to its local snapshot directory.
 
-    Python captures default parameter values at function DEFINITION time.
-    Both Model.from_pretrained(cache_dir=CACHE_DIR) and
-    Pipeline.from_pretrained(cache_dir=CACHE_DIR) baked the old
-    ~/.cache/torch/pyannote path into their __defaults__ tuple when the
-    class was first imported (triggered by features.py at app startup).
-    Patching the module attribute has no effect — we must rewrite the
-    function's __defaults__ directly.
+    Reads the refs/main file to get the commit hash, then returns the
+    full path to the snapshot directory containing the model files.
     """
-    models_dir = _get_bundled_models_dir()
-    if not models_dir:
-        return
+    org, name = model_id.split("/")
+    model_dir = os.path.join(hub_dir, f"models--{org}--{name}")
+    refs_file = os.path.join(model_dir, "refs", "main")
+    with open(refs_file) as f:
+        commit_hash = f.read().strip()
+    return os.path.join(model_dir, "snapshots", commit_hash)
 
-    hub_dir = os.path.join(models_dir, "hub")
 
-    # ── Patch from_pretrained __defaults__ (the actual root cause) ──
-    # cache_dir is the last positional default in both methods.
-    from pyannote.audio.core.model import Model
-    from pyannote.audio.core.pipeline import Pipeline as PAPipeline
+def _load_bundled_pipeline(diarization_model, hub_dir, on_progress=print):
+    """Load a pyannote pipeline entirely from local files, bypassing HF Hub.
 
-    for cls in (Model, PAPipeline):
-        func = cls.from_pretrained.__func__
-        defaults = list(func.__defaults__)
-        defaults[-1] = hub_dir
-        func.__defaults__ = tuple(defaults)
+    Resolves the pipeline config and sub-model weights from the bundled
+    HuggingFace cache directory structure (models/hub/). Rewrites the config
+    so sub-model references point directly at local pytorch_model.bin files.
+    This way pyannote never attempts to contact HuggingFace Hub for anything.
+    """
+    from pyannote.audio import Pipeline
 
-    # ── Patch module-level CACHE_DIR for any inline usage ──
-    for mod_name in (
-        'pyannote.audio.core.model',
-        'pyannote.audio.core.pipeline',
-        'pyannote.audio.pipelines.speaker_verification',
-    ):
-        mod = sys.modules.get(mod_name)
-        if mod and hasattr(mod, 'CACHE_DIR'):
-            mod.CACHE_DIR = hub_dir
+    pipeline_dir = _resolve_snapshot(diarization_model, hub_dir)
+    config_path = os.path.join(pipeline_dir, "config.yaml")
 
-    # ── Patch huggingface_hub constants ──
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+
+    # Replace sub-model HF repo IDs with local pytorch_model.bin paths
+    params = config["pipeline"]["params"]
+    for key in ("segmentation", "embedding"):
+        model_id = params.get(key)
+        if model_id and "/" in model_id:
+            snap_dir = _resolve_snapshot(model_id, hub_dir)
+            local_bin = os.path.join(snap_dir, "pytorch_model.bin")
+            if os.path.isfile(local_bin):
+                params[key] = local_bin
+                on_progress(f"  Resolved {key}: {model_id} -> local")
+
+    # Write modified config to a temp file and load the pipeline from it
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".yaml", prefix="scrivox_diarize_")
     try:
-        import huggingface_hub.constants
-        huggingface_hub.constants.HF_HUB_OFFLINE = True
-        huggingface_hub.constants.HF_HUB_CACHE = hub_dir
-    except ImportError:
-        return
+        with os.fdopen(tmp_fd, "w") as tmp:
+            yaml.dump(config, tmp)
 
-    for mod in sys.modules.values():
-        if (mod is not None
-                and getattr(mod, '__package__', None)
-                and getattr(mod, '__package__', '').startswith('huggingface_hub')):
-            if hasattr(mod, 'HF_HUB_OFFLINE'):
-                mod.HF_HUB_OFFLINE = True
-            if hasattr(mod, 'HF_HUB_CACHE'):
-                mod.HF_HUB_CACHE = hub_dir
+        with _allow_unsafe_torch_load():
+            pipeline = Pipeline.from_pretrained(tmp_path)
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+    return pipeline
 
 
 def diarize_audio(audio_path, hf_token, num_speakers=None, min_speakers=None,
@@ -117,25 +117,15 @@ def diarize_audio(audio_path, hf_token, num_speakers=None, min_speakers=None,
     """Run speaker diarization on audio. Returns list of speaker segments.
 
     If bundled models are found in a 'models/' directory next to the exe,
-    they are used directly and no HF token is needed for download.
+    they are loaded directly from disk — no HF token or network needed.
     """
     from .constants import DEFAULT_DIARIZATION_MODEL
 
     if not diarization_model:
         diarization_model = DEFAULT_DIARIZATION_MODEL
 
-    # Set env vars BEFORE importing pyannote — but features.py may have
-    # already imported pyannote (and huggingface_hub) at app startup,
-    # so env vars alone are not enough.
+    # Set env vars BEFORE importing pyannote as a safety net.
     has_bundled = _setup_bundled_cache()
-
-    from pyannote.audio import Pipeline
-
-    # Force-patch ALL cached huggingface_hub constants: offline flag,
-    # HF_HOME, and HF_HUB_CACHE. These were cached at import time
-    # (triggered by features.py) pointing to ~/.cache/huggingface.
-    if has_bundled:
-        _force_hf_cache_and_offline()
 
     wav_path = None
     ext = os.path.splitext(audio_path)[1].lower()
@@ -153,17 +143,19 @@ def diarize_audio(audio_path, hf_token, num_speakers=None, min_speakers=None,
             on_progress("Downloading diarization models (first run only)...")
 
         on_progress(f"Loading {diarization_model} on CUDA...")
-        with _allow_unsafe_torch_load():
-            if has_bundled:
-                # Bundled models — load from local cache, no token needed.
-                # Pass cache_dir explicitly so pyannote looks in the right
-                # place even if huggingface_hub constants weren't fully patched.
-                bundled_hub = os.path.join(_get_bundled_models_dir(), "hub")
-                pipeline = Pipeline.from_pretrained(
-                    diarization_model, cache_dir=bundled_hub,
-                )
-            else:
-                # Download from HF Hub — needs token
+        if has_bundled:
+            # Bundled models — resolve local paths and load directly from disk.
+            # This bypasses HuggingFace Hub entirely: no cache lookups, no
+            # token checks, no network access. The config is rewritten so
+            # sub-model references point at local pytorch_model.bin files.
+            bundled_hub = os.path.join(_get_bundled_models_dir(), "hub")
+            pipeline = _load_bundled_pipeline(
+                diarization_model, bundled_hub, on_progress=on_progress,
+            )
+        else:
+            # Download from HF Hub — needs token
+            from pyannote.audio import Pipeline
+            with _allow_unsafe_torch_load():
                 # pyannote >= 3.3 uses 'token'; older versions use 'use_auth_token'
                 try:
                     pipeline = Pipeline.from_pretrained(
