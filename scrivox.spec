@@ -86,7 +86,7 @@ if not is_lite:
 
 # Common hidden imports for all variants
 all_hiddenimports += [
-    'sounddevice', 'pynput', 'pynput.keyboard', 'pynput.keyboard._win32',
+    'sounddevice', 'soundfile', 'pynput', 'pynput.keyboard', 'pynput.keyboard._win32',
     'keyboard', 'pyperclip', 'dotenv',
 ]
 
