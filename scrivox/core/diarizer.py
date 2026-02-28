@@ -6,7 +6,7 @@ import threading
 import time
 
 import torch
-import torchaudio
+import soundfile as sf
 
 from .torch_compat import _allow_unsafe_torch_load
 from .media import extract_wav
@@ -122,7 +122,10 @@ def diarize_audio(audio_path, hf_token, num_speakers=None, min_speakers=None,
 
     # Pre-load audio as a waveform tensor so pyannote never touches
     # torchcodec's AudioDecoder (broken on Windows / PyInstaller).
-    waveform, sample_rate = torchaudio.load(wav_file)
+    # Use soundfile instead of torchaudio — torchaudio 2.10+ delegates to
+    # torchcodec internally, which fails in bundled builds.
+    data, sample_rate = sf.read(wav_file, dtype="float32")
+    waveform = torch.from_numpy(data).unsqueeze(0)  # (samples,) -> (1, samples)
     diarize_input = {"waveform": waveform, "sample_rate": sample_rate}
 
     try:

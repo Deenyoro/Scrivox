@@ -56,7 +56,6 @@ for _nvidia_pkg in [
 # ── Regular/Full only (diarization + advanced features) ──
 if not is_lite:
     pa_datas, pa_binaries, pa_hiddenimports = collect_all('pyannote.audio')
-    tc_datas, tc_binaries, tc_hiddenimports = collect_all('torchcodec')
     ta_datas, ta_binaries, ta_hiddenimports = collect_all('torchaudio')
     pc_datas, pc_binaries, pc_hiddenimports = collect_all('pyannote.core')
     pd_datas, pd_binaries, pd_hiddenimports = collect_all('pyannote.database')
@@ -66,10 +65,10 @@ if not is_lite:
     lf_datas, lf_binaries, lf_hiddenimports = collect_all('lightning_fabric')
     lt_datas, lt_binaries, lt_hiddenimports = collect_all('lightning')
 
-    all_datas += pa_datas + tc_datas + ta_datas + pc_datas + pd_datas + pp_datas + tm_datas + pl_datas + lf_datas + lt_datas
-    all_binaries += pa_binaries + tc_binaries + ta_binaries + pc_binaries + pd_binaries + pp_binaries + tm_binaries + pl_binaries + lf_binaries + lt_binaries
+    all_datas += pa_datas + ta_datas + pc_datas + pd_datas + pp_datas + tm_datas + pl_datas + lf_datas + lt_datas
+    all_binaries += pa_binaries + ta_binaries + pc_binaries + pd_binaries + pp_binaries + tm_binaries + pl_binaries + lf_binaries + lt_binaries
     all_hiddenimports += (
-        pa_hiddenimports + tc_hiddenimports + ta_hiddenimports
+        pa_hiddenimports + ta_hiddenimports
         + pc_hiddenimports + pd_hiddenimports + pp_hiddenimports + tm_hiddenimports
         + pl_hiddenimports + lf_hiddenimports + lt_hiddenimports
         + [
@@ -99,7 +98,7 @@ metadata_packages = [
     'faster_whisper', 'ctranslate2',
 ]
 if not is_lite:
-    metadata_packages += ['pyannote.audio', 'torchcodec', 'torchaudio',
+    metadata_packages += ['pyannote.audio', 'torchaudio',
                           'pytorch_lightning', 'lightning_fabric', 'lightning']
 
 extra_datas = []
