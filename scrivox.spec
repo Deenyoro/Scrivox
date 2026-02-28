@@ -62,12 +62,16 @@ if not is_lite:
     pd_datas, pd_binaries, pd_hiddenimports = collect_all('pyannote.database')
     pp_datas, pp_binaries, pp_hiddenimports = collect_all('pyannote.pipeline')
     tm_datas, tm_binaries, tm_hiddenimports = collect_all('torchmetrics')
+    pl_datas, pl_binaries, pl_hiddenimports = collect_all('pytorch_lightning')
+    lf_datas, lf_binaries, lf_hiddenimports = collect_all('lightning_fabric')
+    lt_datas, lt_binaries, lt_hiddenimports = collect_all('lightning')
 
-    all_datas += pa_datas + sb_datas + ta_datas + pc_datas + pd_datas + pp_datas + tm_datas
-    all_binaries += pa_binaries + sb_binaries + ta_binaries + pc_binaries + pd_binaries + pp_binaries + tm_binaries
+    all_datas += pa_datas + sb_datas + ta_datas + pc_datas + pd_datas + pp_datas + tm_datas + pl_datas + lf_datas + lt_datas
+    all_binaries += pa_binaries + sb_binaries + ta_binaries + pc_binaries + pd_binaries + pp_binaries + tm_binaries + pl_binaries + lf_binaries + lt_binaries
     all_hiddenimports += (
         pa_hiddenimports + sb_hiddenimports + ta_hiddenimports
         + pc_hiddenimports + pd_hiddenimports + pp_hiddenimports + tm_hiddenimports
+        + pl_hiddenimports + lf_hiddenimports + lt_hiddenimports
         + [
             'sklearn', 'sklearn.cluster', 'sklearn.utils', 'sklearn.utils._cython_blas',
             'sklearn.neighbors', 'sklearn.neighbors._typedefs',
@@ -95,7 +99,8 @@ metadata_packages = [
     'faster_whisper', 'ctranslate2',
 ]
 if not is_lite:
-    metadata_packages += ['pyannote.audio', 'speechbrain', 'torchaudio']
+    metadata_packages += ['pyannote.audio', 'speechbrain', 'torchaudio',
+                          'pytorch_lightning', 'lightning_fabric', 'lightning']
 
 extra_datas = []
 for pkg in metadata_packages:
