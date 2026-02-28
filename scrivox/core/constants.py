@@ -26,31 +26,35 @@ LLM_PROVIDERS = {
     "Ollama (local)": "http://localhost:11434/v1/chat/completions",
 }
 DEFAULT_LLM_PROVIDER = "OpenRouter"
-DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
+DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6-20250520"
 
 # Preset model lists for combobox dropdowns
 LLM_MODEL_PRESETS = [
+    "google/gemini-3-flash-preview",
     "google/gemini-2.5-flash",
     "google/gemini-2.5-pro",
-    "google/gemini-2.0-flash-exp:free",
-    "anthropic/claude-sonnet-4-20250514",
-    "anthropic/claude-haiku-4-20250414",
-    "openai/gpt-4o",
-    "openai/gpt-4o-mini",
+    "anthropic/claude-sonnet-4.6",
+    "anthropic/claude-haiku-4.5",
+    "openai/gpt-5",
+    "openai/gpt-4.1-mini",
+    "x-ai/grok-4",
+    "deepseek/deepseek-v3.2",
     "meta-llama/llama-3.3-70b-instruct",
-    "deepseek/deepseek-chat-v3-0324",
-    "qwen/qwen-2.5-72b-instruct",
-    "mistralai/mistral-small-3.1-24b-instruct",
+    "qwen/qwen3.5-plus",
+    "mistralai/mistral-large-2512",
+    "google/gemini-2.0-flash-exp:free",
 ]
 
 VISION_MODEL_PRESETS = [
+    "google/gemini-3-flash-preview",
     "google/gemini-2.5-flash",
     "google/gemini-2.5-pro",
+    "anthropic/claude-sonnet-4.6",
+    "anthropic/claude-haiku-4.5",
+    "openai/gpt-5",
+    "openai/gpt-4.1-mini",
+    "x-ai/grok-4",
     "google/gemini-2.0-flash-exp:free",
-    "anthropic/claude-sonnet-4-20250514",
-    "anthropic/claude-haiku-4-20250414",
-    "openai/gpt-4o",
-    "openai/gpt-4o-mini",
 ]
 
 # Whisper-supported languages: display name -> ISO 639-1 code
