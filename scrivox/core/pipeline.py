@@ -52,9 +52,10 @@ class PipelineConfig:
     speaker_names: Optional[List[str]] = None
 
     # Vision
-    vision_interval: int = 60
+    vision_interval: float = 60
     vision_model: str = DEFAULT_VISION_MODEL
     vision_workers: int = 4
+    vision_change_threshold: int = 0  # dhash bits of tolerance; 0 disables dedup
 
     # Summary
     summary_model: str = DEFAULT_SUMMARY_MODEL
@@ -386,6 +387,7 @@ class TranscriptionPipeline:
                 keyframes, tmpdir = extract_keyframes(
                     cfg.input_path,
                     interval_secs=cfg.vision_interval,
+                    change_threshold=cfg.vision_change_threshold,
                     on_progress=self.on_progress,
                 )
                 if keyframes:

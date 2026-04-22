@@ -13,41 +13,96 @@ from .llm_client import chat_completion
 from .media import get_media_duration
 
 
-def extract_keyframes(video_path, interval_secs=60, max_frames=30, on_progress=print):
-    """Extract keyframes from video at regular intervals."""
+def _dhash(image_path, hash_size=8):
+    """64-bit difference hash of an image. Returns int. Resilient to minor compression/noise."""
+    from PIL import Image
+    with Image.open(image_path) as img:
+        small = img.convert("L").resize((hash_size + 1, hash_size), Image.LANCZOS)
+        pixels = list(small.getdata())
+    diff = 0
+    width = hash_size + 1
+    for row in range(hash_size):
+        base = row * width
+        for col in range(hash_size):
+            left = pixels[base + col]
+            right = pixels[base + col + 1]
+            diff = (diff << 1) | (1 if left > right else 0)
+    return diff
+
+
+def _hamming(a, b):
+    return bin(a ^ b).count("1")
+
+
+def extract_keyframes(video_path, interval_secs=60, max_frames=0, change_threshold=0, on_progress=print):
+    """Extract keyframes from video at regular intervals, optionally deduping unchanged frames.
+
+    Args:
+        interval_secs: Sampling interval in seconds. Float values < 1.0 are supported.
+        max_frames: Maximum frames to extract. 0 = unlimited (use interval as-is).
+        change_threshold: If > 0, dedupe frames whose dhash differs from the last kept
+            frame by at most this many bits (out of 64). Typical: 5. 0 disables dedup.
+    """
     tmpdir = tempfile.mkdtemp(prefix="whisper_frames_")
 
     duration = get_media_duration(video_path)
     if duration is None:
         on_progress("Warning: Could not determine video duration, using default interval")
-        duration = interval_secs * max_frames
+        duration = interval_secs * (max_frames or 30)
 
-    if duration / interval_secs > max_frames:
+    if max_frames > 0 and duration / interval_secs > max_frames:
         old_interval = interval_secs
-        interval_secs = int(duration / max_frames)
-        on_progress(f"  Adjusted keyframe interval from {old_interval}s to {interval_secs}s (capped at {max_frames} frames)")
+        interval_secs = duration / max_frames
+        on_progress(f"  Adjusted keyframe interval from {old_interval}s to {interval_secs:.2f}s (capped at {max_frames} frames)")
 
-    on_progress(f"Extracting keyframes every {interval_secs}s from {duration:.0f}s video...")
+    interval_secs = float(interval_secs)
+    fps_expr = f"{1.0 / interval_secs:.6f}"
+    on_progress(f"Extracting keyframes every {interval_secs}s from {duration:.0f}s video (fps={fps_expr})...")
 
     from .media import _subprocess_flags
     subprocess.run(
         ["ffmpeg", "-y", "-i", video_path,
-         "-vf", f"fps=1/{int(interval_secs)},scale=1280:-2",
+         "-vf", f"fps={fps_expr},scale=1280:-2",
          "-q:v", "3",
-         os.path.join(tmpdir, "frame_%04d.jpg")],
+         os.path.join(tmpdir, "frame_%05d.jpg")],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True,
-        timeout=600,
+        timeout=7200,
         **_subprocess_flags(),
     )
 
     frames = sorted(glob.glob(os.path.join(tmpdir, "frame_*.jpg")))
-    keyframes = []
+    all_keyframes = []
     for i, path in enumerate(frames):
         timestamp = i * interval_secs
-        keyframes.append({"path": path, "timestamp": timestamp})
+        all_keyframes.append({"path": path, "timestamp": timestamp})
 
-    on_progress(f"Extracted {len(keyframes)} keyframes")
-    return keyframes, tmpdir
+    if change_threshold <= 0 or len(all_keyframes) <= 1:
+        on_progress(f"Extracted {len(all_keyframes)} keyframes")
+        return all_keyframes, tmpdir
+
+    on_progress(f"Deduping {len(all_keyframes)} frames (change_threshold={change_threshold} bits)...")
+    kept = []
+    last_hash = None
+    dropped = 0
+    for kf in all_keyframes:
+        try:
+            h = _dhash(kf["path"])
+        except Exception as e:
+            on_progress(f"  Hash failed for {os.path.basename(kf['path'])}: {e} — keeping frame")
+            kept.append(kf)
+            last_hash = None
+            continue
+        if last_hash is None or _hamming(h, last_hash) > change_threshold:
+            kept.append(kf)
+            last_hash = h
+        else:
+            dropped += 1
+            try:
+                os.remove(kf["path"])
+            except OSError:
+                pass
+    on_progress(f"Kept {len(kept)} unique frames (dropped {dropped} near-duplicates)")
+    return kept, tmpdir
 
 
 def describe_keyframe(image_path, timestamp, api_key, vision_model, api_base=None, max_retries=3, on_progress=print):

@@ -67,12 +67,15 @@ def build_parser():
     vision_group = parser.add_argument_group("Vision Analysis")
     vision_group.add_argument("--vision", action="store_true",
                               help="Extract keyframes and describe with vision LLM (video only)")
-    vision_group.add_argument("--vision-interval", type=int, default=60,
-                              help="Seconds between keyframe captures (default: 60)")
+    vision_group.add_argument("--vision-interval", type=float, default=60,
+                              help="Seconds between keyframe captures (default: 60). Fractional values allowed (e.g. 0.5).")
     vision_group.add_argument("--vision-model", default=DEFAULT_VISION_MODEL,
                               help=f"Vision LLM model (default: {DEFAULT_VISION_MODEL})")
     vision_group.add_argument("--vision-workers", type=int, default=4,
                               help="Concurrent vision API requests (default: 4)")
+    vision_group.add_argument("--vision-change-threshold", type=int, default=0,
+                              help="Skip near-duplicate frames whose dhash differs by <= N bits (out of 64). "
+                                   "0 disables (default). Typical: 5 for aggressive dedup, 2 for conservative.")
 
     # Summary options
     summary_group = parser.add_argument_group("Meeting Summary")
@@ -223,8 +226,8 @@ def run_cli(argv=None):
     if args.num_speakers is not None and (args.min_speakers is not None or args.max_speakers is not None):
         print("Warning: --num-speakers overrides --min-speakers/--max-speakers", file=sys.stderr)
 
-    if args.vision_interval < 1:
-        print("Error: --vision-interval must be at least 1 second", file=sys.stderr)
+    if args.vision_interval <= 0:
+        print("Error: --vision-interval must be greater than 0", file=sys.stderr)
         sys.exit(1)
 
     # Parse speaker names
@@ -258,6 +261,7 @@ def run_cli(argv=None):
         vision_interval=args.vision_interval,
         vision_model=args.vision_model,
         vision_workers=args.vision_workers,
+        vision_change_threshold=args.vision_change_threshold,
         summary_model=args.summary_model,
         translate=bool(args.translate_to),
         translate_all=args.translate_all,
