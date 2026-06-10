@@ -48,8 +48,10 @@ class LogFrame(ttk.LabelFrame):
             self.after_cancel(self._flush_id)
             self._flush_id = None
         self.text_widget.configure(state=tk.NORMAL)
-        self.text_widget.delete("1.0", tk.END)
-        self.text_widget.configure(state=tk.DISABLED)
+        try:
+            self.text_widget.delete("1.0", tk.END)
+        finally:
+            self.text_widget.configure(state=tk.DISABLED)
 
     def append(self, text):
         """Buffer text and schedule a batched flush (thread-safe if called via root.after)."""
@@ -64,7 +66,10 @@ class LogFrame(ttk.LabelFrame):
             return
         combined = "".join(self._buffer)
         self._buffer.clear()
-        self.text_widget.configure(state=tk.NORMAL)
-        self.text_widget.insert(tk.END, combined)
-        self.text_widget.see(tk.END)
-        self.text_widget.configure(state=tk.DISABLED)
+        try:
+            self.text_widget.configure(state=tk.NORMAL)
+            self.text_widget.insert(tk.END, combined)
+            self.text_widget.see(tk.END)
+            self.text_widget.configure(state=tk.DISABLED)
+        except tk.TclError:
+            pass  # widget destroyed during shutdown

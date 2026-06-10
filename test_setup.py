@@ -73,8 +73,12 @@ if hf_token:
     print(f"  [OK] HF_TOKEN: set ({hf_token[:8]}...)")
 else:
     try:
-        from huggingface_hub import HfFolder
-        token = HfFolder.get_token()
+        try:
+            from huggingface_hub import get_token
+        except ImportError:
+            from huggingface_hub import HfFolder
+            get_token = HfFolder.get_token
+        token = get_token()
         if token:
             print(f"  [OK] HF_TOKEN: cached via huggingface-cli ({token[:8]}...)")
             hf_token = token

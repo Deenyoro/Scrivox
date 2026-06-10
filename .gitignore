@@ -15,6 +15,19 @@ build/
 # Whisper cache files
 *.whisper_cache.json
 
+# Local test media & transcription outputs
+*.srt
+*.vtt
+*.mkv
+*.mp4
+*.mp3
+*.wav
+*.m4a
+*.flac
+*_transcript.txt
+meeting_test.md
+startrek_meeting.txt
+
 # Temp files
 whisper_frames_*/
 *.tmp

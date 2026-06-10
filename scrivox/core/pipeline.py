@@ -199,9 +199,16 @@ class TranscriptionPipeline:
         openrouter_key = cfg.openrouter_key or os.environ.get("OPENROUTER_API_KEY")
 
         if cfg.diarize and not hf_token:
+            # huggingface_hub 1.x removed HfFolder; get_token() works on 0.21+
             try:
-                from huggingface_hub import HfFolder
-                hf_token = HfFolder.get_token()
+                from huggingface_hub import get_token
+                hf_token = get_token()
+            except ImportError:
+                try:
+                    from huggingface_hub import HfFolder
+                    hf_token = HfFolder.get_token()
+                except Exception:
+                    pass
             except Exception:
                 pass
         # Bundled models don't need an HF token
@@ -364,7 +371,10 @@ class TranscriptionPipeline:
             finally:
                 # Clean up pre-extracted WAV
                 if _pre_extracted_wav and os.path.exists(_pre_extracted_wav):
-                    os.remove(_pre_extracted_wav)
+                    try:
+                        os.remove(_pre_extracted_wav)
+                    except OSError:
+                        pass
         else:
             # Advance step counter for skipped diarize
             if cfg.diarize:

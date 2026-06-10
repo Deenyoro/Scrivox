@@ -86,6 +86,7 @@ class SettingsFrame(ttk.Frame):
         self.vision_interval_var = tk.StringVar(value="60")
         self.vision_model_var = tk.StringVar(value=DEFAULT_VISION_MODEL)
         self.vision_workers_var = tk.StringVar(value="4")
+        self.vision_change_threshold_var = tk.StringVar(value="0")
 
         # Summary sub-settings
         self.summary_model_var = tk.StringVar(value=DEFAULT_SUMMARY_MODEL)
@@ -217,7 +218,9 @@ class SettingsFrame(ttk.Frame):
         ttk.Label(row, text="Interval (s):").pack(side=tk.LEFT)
         interval_entry = ttk.Entry(row, textvariable=self.vision_interval_var, width=6)
         interval_entry.pack(side=tk.RIGHT)
-        ToolTip(interval_entry, "Seconds between keyframe captures\nLower = more detail, higher API cost")
+        ToolTip(interval_entry, "Seconds between keyframe captures\n"
+                                "Fractional values allowed (e.g. 0.5)\n"
+                                "Lower = more detail, higher API cost")
 
         row = ttk.Frame(self._vision_frame)
         row.pack(fill=tk.X, padx=8, pady=2)
@@ -233,12 +236,22 @@ class SettingsFrame(ttk.Frame):
         workers_entry.pack(side=tk.RIGHT)
         ToolTip(workers_entry, "Number of concurrent API requests\nHigher = faster, more API load")
 
+        row = ttk.Frame(self._vision_frame)
+        row.pack(fill=tk.X, padx=8, pady=(2, 4))
+        ttk.Label(row, text="Skip similar frames:").pack(side=tk.LEFT)
+        change_entry = ttk.Entry(row, textvariable=self.vision_change_threshold_var, width=6)
+        change_entry.pack(side=tk.RIGHT)
+        ToolTip(change_entry, "Skip near-duplicate frames whose dhash differs\n"
+                              "by <= N bits (out of 64). 0 = disabled.\n"
+                              "Typical: 2 conservative, 5 aggressive")
+
         # Vision validation
         self._vision_validation = ttk.Label(self._vision_frame, text="", style="Error.TLabel")
         self._vision_validation.pack(padx=8, pady=(0, 6), anchor=tk.W)
 
         self.vision_interval_var.trace_add("write", self._validate_vision)
         self.vision_workers_var.trace_add("write", self._validate_vision)
+        self.vision_change_threshold_var.trace_add("write", self._validate_vision)
 
         # ── SUMMARY SUB-SETTINGS ──
         self._summary_frame = ttk.LabelFrame(self, text="SUMMARY")
@@ -322,13 +335,16 @@ class SettingsFrame(ttk.Frame):
     def _validate_vision(self, *args):
         """Real-time validation of vision fields."""
         errors = []
-        interval = self._parse_int(self.vision_interval_var.get())
+        interval = self._parse_float(self.vision_interval_var.get())
         workers = self._parse_int(self.vision_workers_var.get())
+        threshold = self._parse_int(self.vision_change_threshold_var.get())
 
-        if interval is not None and interval < 1:
-            errors.append("Interval must be >= 1")
+        if interval is not None and interval <= 0:
+            errors.append("Interval must be > 0")
         if workers is not None and workers < 1:
             errors.append("Workers must be >= 1")
+        if threshold is not None and not 0 <= threshold <= 64:
+            errors.append("Skip threshold must be 0-64")
 
         self._vision_validation.configure(text=errors[0] if errors else "")
 
@@ -339,6 +355,16 @@ class SettingsFrame(ttk.Frame):
             return None
         try:
             return int(val)
+        except ValueError:
+            return None
+
+    def _parse_float(self, val):
+        """Parse string as float, return None if empty or invalid."""
+        val = val.strip()
+        if not val:
+            return None
+        try:
+            return float(val)
         except ValueError:
             return None
 
@@ -420,6 +446,14 @@ class SettingsFrame(ttk.Frame):
         except (ValueError, TypeError):
             return default
 
+    @staticmethod
+    def _safe_float(value, default):
+        """Parse a string as float, returning default on failure."""
+        try:
+            return float(value) if value else default
+        except (ValueError, TypeError):
+            return default
+
     def get_int_or_none(self, var):
         """Parse a StringVar as int or return None."""
         val = var.get().strip()
@@ -454,9 +488,13 @@ class SettingsFrame(ttk.Frame):
             self.translate_all_var.set(settings.get("translate_all", False))
 
         self.speaker_names_var.set(settings.get("speaker_names", ""))
-        self.vision_interval_var.set(str(settings.get("vision_interval", 60)))
+        interval = settings.get("vision_interval", 60)
+        if isinstance(interval, float) and interval == int(interval):
+            interval = int(interval)
+        self.vision_interval_var.set(str(interval))
         self.vision_model_var.set(settings.get("vision_model", DEFAULT_VISION_MODEL))
         self.vision_workers_var.set(str(settings.get("vision_workers", 4)))
+        self.vision_change_threshold_var.set(str(settings.get("vision_change_threshold", 0)))
         self.summary_model_var.set(settings.get("summary_model", DEFAULT_SUMMARY_MODEL))
 
         # Translation settings — handle comma-separated codes like "ar,fr"
@@ -509,8 +547,9 @@ class SettingsFrame(ttk.Frame):
             "min_speakers": self.get_int_or_none(self.min_speakers_var),
             "max_speakers": self.get_int_or_none(self.max_speakers_var),
             "speaker_names": self.speaker_names_var.get(),
-            "vision_interval": self._safe_int(self.vision_interval_var.get(), 60),
+            "vision_interval": self._safe_float(self.vision_interval_var.get(), 60.0),
             "vision_model": self.vision_model_var.get(),
             "vision_workers": self._safe_int(self.vision_workers_var.get(), 4),
+            "vision_change_threshold": self._safe_int(self.vision_change_threshold_var.get(), 0),
             "summary_model": self.summary_model_var.get(),
         }

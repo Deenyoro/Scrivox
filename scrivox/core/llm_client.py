@@ -47,15 +47,16 @@ def _convert_openai_to_anthropic_messages(messages):
                 block_type = block.get("type", "")
 
                 if block_type == "text":
-                    new_blocks.append({"type": "text", "text": block["text"]})
+                    new_blocks.append({"type": "text", "text": block.get("text", "")})
 
                 elif block_type == "image_url":
                     # Convert OpenAI image_url to Anthropic image source
                     url = block.get("image_url", {}).get("url", "")
-                    if url.startswith("data:"):
+                    if url.startswith("data:") and "," in url:
                         # Parse data URI: data:image/jpeg;base64,<data>
                         header, data = url.split(",", 1)
-                        media_type = header.split(":")[1].split(";")[0]
+                        media_parts = header.split(":", 1)
+                        media_type = media_parts[1].split(";")[0] if len(media_parts) > 1 and media_parts[1] else "image/jpeg"
                         new_blocks.append({
                             "type": "image",
                             "source": {

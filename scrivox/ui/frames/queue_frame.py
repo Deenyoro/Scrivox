@@ -35,11 +35,13 @@ class QueueFrame(ttk.LabelFrame):
         btn_bar = ttk.Frame(self)
         btn_bar.pack(fill=tk.X, padx=8, pady=(8, 4))
 
-        ttk.Button(btn_bar, text="Add Files...", command=self.browse_files).pack(
-            side=tk.LEFT, padx=(0, 4))
-        ttk.Button(btn_bar, text="Remove", command=self._remove_selected).pack(
-            side=tk.LEFT, padx=(0, 4))
-        ttk.Button(btn_bar, text="Clear All", command=self._clear_all).pack(side=tk.LEFT)
+        self._add_btn = ttk.Button(btn_bar, text="Add Files...", command=self.browse_files)
+        self._add_btn.pack(side=tk.LEFT, padx=(0, 4))
+        self._remove_btn = ttk.Button(btn_bar, text="Remove", command=self._remove_selected)
+        self._remove_btn.pack(side=tk.LEFT, padx=(0, 4))
+        self._clear_btn = ttk.Button(btn_bar, text="Clear All", command=self._clear_all)
+        self._clear_btn.pack(side=tk.LEFT)
+        self._enabled = True
 
         # ── Treeview (job table) ──
         tree_frame = ttk.Frame(self)
@@ -98,13 +100,17 @@ class QueueFrame(ttk.LabelFrame):
 
     def _on_drop(self, event):
         """Handle dropped files."""
+        if not self._enabled:
+            return
         # tkinterdnd2 wraps paths with spaces in braces: {C:\path with spaces\file.mp4}
         raw = event.data
         paths = []
         i = 0
         while i < len(raw):
             if raw[i] == "{":
-                end = raw.index("}", i)
+                end = raw.find("}", i)
+                if end == -1:
+                    break  # malformed drop data
                 paths.append(raw[i + 1:end])
                 i = end + 2  # skip closing brace and space
             elif raw[i] == " ":
@@ -244,3 +250,10 @@ class QueueFrame(ttk.LabelFrame):
     @property
     def has_jobs(self):
         return len(self._jobs) > 0
+
+    def set_enabled(self, enabled):
+        """Enable/disable queue editing (locked while a batch is running)."""
+        self._enabled = enabled
+        state = tk.NORMAL if enabled else tk.DISABLED
+        for btn in (self._add_btn, self._remove_btn, self._clear_btn):
+            btn.configure(state=state)

@@ -229,6 +229,33 @@ def run_cli(argv=None):
     if args.vision_interval <= 0:
         print("Error: --vision-interval must be greater than 0", file=sys.stderr)
         sys.exit(1)
+    if args.vision_workers < 1:
+        print("Error: --vision-workers must be at least 1", file=sys.stderr)
+        sys.exit(1)
+    if not 0 <= args.vision_change_threshold <= 64:
+        print("Error: --vision-change-threshold must be between 0 and 64", file=sys.stderr)
+        sys.exit(1)
+    if args.audio_track < 0:
+        print("Error: --audio-track must be 0 or greater", file=sys.stderr)
+        sys.exit(1)
+    if args.subtitle_max_chars <= 0:
+        print("Error: --subtitle-max-chars must be greater than 0", file=sys.stderr)
+        sys.exit(1)
+    if args.subtitle_min_chars < 0:
+        print("Error: --subtitle-min-chars cannot be negative", file=sys.stderr)
+        sys.exit(1)
+    if args.subtitle_min_chars > args.subtitle_max_chars:
+        print("Error: --subtitle-min-chars cannot exceed --subtitle-max-chars", file=sys.stderr)
+        sys.exit(1)
+    if args.subtitle_max_duration <= 0:
+        print("Error: --subtitle-max-duration must be greater than 0", file=sys.stderr)
+        sys.exit(1)
+    if args.subtitle_max_gap < 0:
+        print("Error: --subtitle-max-gap cannot be negative", file=sys.stderr)
+        sys.exit(1)
+    if not 0.0 <= args.confidence_threshold <= 1.0:
+        print("Error: --confidence-threshold must be between 0.0 and 1.0", file=sys.stderr)
+        sys.exit(1)
 
     # Parse speaker names
     speaker_names = None
@@ -289,6 +316,9 @@ def run_cli(argv=None):
     except PipelineError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
+    except KeyboardInterrupt:
+        print("\nCancelled.", file=sys.stderr)
+        sys.exit(130)
 
     # Print translated output paths
     for tr in result.translated_outputs:

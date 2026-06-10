@@ -80,19 +80,27 @@ class ResultsFrame(ttk.LabelFrame):
         self._output_path = None
         self._full_text = ""
         self._open_btn.configure(state=tk.DISABLED)
+        self._copy_btn.configure(text="Copy")
 
     def _copy(self):
         """Copy full text to clipboard with visual feedback."""
         text = self._full_text
-        if text:
+        if not text:
+            return
+        try:
             self.clipboard_clear()
             self.clipboard_append(text)
-            # Flash "Copied!" feedback
-            self._copy_btn.configure(text="Copied!")
-            self.after(1500, lambda: self._copy_btn.configure(text="Copy"))
+        except tk.TclError:
+            return
+        # Flash "Copied!" feedback
+        self._copy_btn.configure(text="Copied!")
+        self.after(1500, lambda: self._copy_btn.configure(text="Copy"))
 
     def _save_as(self):
         """Save results to a file."""
+        if not self._full_text:
+            messagebox.showinfo("Nothing to save", "Run a transcription first.")
+            return
         path = filedialog.asksaveasfilename(
             title="Save transcript",
             defaultextension=".txt",

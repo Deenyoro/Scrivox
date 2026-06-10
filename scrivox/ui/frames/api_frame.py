@@ -151,12 +151,15 @@ class ApiFrame(ttk.LabelFrame):
         self._status_label.configure(text="Testing...", style="Dim.TLabel")
         self._test_btn.configure(state=tk.DISABLED)
 
+        # Read Tk variables on the main thread before the worker starts
+        hf = self.hf_token_var.get().strip()
+        or_key = self.openrouter_key_var.get().strip()
+        ant_key = self.anthropic_key_var.get().strip()
+        provider = self.provider_var.get()
+        base_url = self.get_api_base()
+
         def _do_test():
             results = []
-            hf = self.hf_token_var.get().strip()
-            or_key = self.openrouter_key_var.get().strip()
-            ant_key = self.anthropic_key_var.get().strip()
-            provider = self.provider_var.get()
 
             # Only test HF token if it's set — skip entirely on Full builds
             if hf:
@@ -211,7 +214,6 @@ class ApiFrame(ttk.LabelFrame):
                 if or_key:
                     try:
                         import requests
-                        base_url = self.get_api_base()
                         test_url = base_url.replace("/chat/completions", "/models")
                         resp = requests.get(
                             test_url,
@@ -232,17 +234,24 @@ class ApiFrame(ttk.LabelFrame):
             if not results:
                 results.append("No keys to test")
 
-            status_text = " | ".join(results)
-            all_ok = all("OK" in r for r in results if "not set" not in r)
+            return " | ".join(results), all("OK" in r for r in results if "not set" not in r)
 
+        def _worker():
+            # Always report back so the Test button never stays disabled
+            try:
+                status_text, all_ok = _do_test()
+            except Exception as e:
+                status_text, all_ok = f"Test failed: {type(e).__name__}", False
             try:
                 self.after(0, lambda: self._update_test_status(status_text, all_ok))
             except Exception:
-                pass
+                pass  # window destroyed
 
-        threading.Thread(target=_do_test, daemon=True).start()
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _update_test_status(self, text, all_ok):
+        if not self.winfo_exists():
+            return
         style = "Success.TLabel" if all_ok else "Error.TLabel"
         self._status_label.configure(text=text, style=style)
         self._test_btn.configure(state=tk.NORMAL)

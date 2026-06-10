@@ -56,10 +56,16 @@ def _resolve_snapshot(model_id, hub_dir):
     Reads the refs/main file to get the commit hash, then returns the
     full path to the snapshot directory containing the model files.
     """
-    org, name = model_id.split("/")
-    model_dir = os.path.join(hub_dir, f"models--{org}--{name}")
+    if "/" not in model_id:
+        raise ValueError(f"Invalid model ID (expected 'org/name'): {model_id}")
+    org, name = model_id.split("/", 1)
+    model_dir = os.path.join(hub_dir, f"models--{org}--{name.replace('/', '--')}")
     refs_file = os.path.join(model_dir, "refs", "main")
-    with open(refs_file) as f:
+    if not os.path.isfile(refs_file):
+        raise FileNotFoundError(
+            f"Bundled model '{model_id}' not found in {hub_dir}\n"
+            f"Expected refs file: {refs_file}")
+    with open(refs_file, encoding="utf-8") as f:
         commit_hash = f.read().strip()
     return os.path.join(model_dir, "snapshots", commit_hash)
 
@@ -125,6 +131,10 @@ def diarize_audio(audio_path, hf_token, num_speakers=None, min_speakers=None,
     # torchcodec internally, which fails in bundled builds.
     import soundfile as sf
     data, sample_rate = sf.read(wav_file, dtype="float32")
+    if data.ndim > 1:
+        # User-supplied multi-channel WAV (extracted WAVs are already mono):
+        # downmix so the tensor is (1, samples) as pyannote expects.
+        data = data.mean(axis=1)
     waveform = torch.from_numpy(data).unsqueeze(0)  # (samples,) -> (1, samples)
     diarize_input = {"waveform": waveform, "sample_rate": sample_rate}
 

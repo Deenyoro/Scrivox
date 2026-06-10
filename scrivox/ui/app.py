@@ -75,6 +75,14 @@ class ScrivoxApp(tk.Tk):
         if saved:
             try:
                 self.geometry(saved)
+                # Recover if the saved position is off-screen (monitor removed,
+                # resolution changed). Clamp the top-left corner back on-screen.
+                self.update_idletasks()
+                x, y = self.winfo_x(), self.winfo_y()
+                max_x = self.winfo_screenwidth() - 100
+                max_y = self.winfo_screenheight() - 100
+                if x < -50 or y < -50 or x > max_x or y > max_y:
+                    self.geometry(f"+{max(0, min(x, max_x))}+{max(0, min(y, max_y))}")
                 return
             except Exception:
                 pass
@@ -384,9 +392,10 @@ class ScrivoxApp(tk.Tk):
             min_speakers=s.get_int_or_none(s.min_speakers_var),
             max_speakers=s.get_int_or_none(s.max_speakers_var),
             speaker_names=s.get_speaker_names(),
-            vision_interval=s._safe_int(s.vision_interval_var.get(), 60),
+            vision_interval=s._safe_float(s.vision_interval_var.get(), 60.0),
             vision_model=s.vision_model_var.get(),
             vision_workers=s._safe_int(s.vision_workers_var.get(), 4),
+            vision_change_threshold=s._safe_int(s.vision_change_threshold_var.get(), 0),
             summary_model=s.summary_model_var.get(),
             translate=s.translate_var.get(),
             translate_all=s.translate_all_var.get(),
@@ -406,12 +415,18 @@ class ScrivoxApp(tk.Tk):
             audio_track=audio_track,
         )
 
+    @property
+    def _is_running(self):
+        return self._pipeline_thread is not None and self._pipeline_thread.is_alive()
+
     def _set_running(self, running):
         """Enable/disable controls during pipeline execution."""
         state = tk.DISABLED if running else tk.NORMAL
         self._start_btn.configure(state=state)
         cancel_state = tk.NORMAL if running else tk.DISABLED
         self._cancel_btn.configure(state=cancel_state)
+        # Lock the queue while running — edits would desync job status rows
+        self.queue_frame.set_enabled(not running)
 
     def _on_progress(self, msg):
         """Thread-safe progress callback: schedules log append on main thread."""
@@ -429,6 +444,8 @@ class ScrivoxApp(tk.Tk):
 
     def _start_pipeline(self):
         """Validate inputs and start the pipeline in a background thread."""
+        if self._is_running:
+            return  # Ctrl+Return can fire while a batch is already running
         if not self._validate():
             return
 
@@ -509,6 +526,8 @@ class ScrivoxApp(tk.Tk):
 
     def _cancel_pipeline(self):
         """Request pipeline cancellation."""
+        if not self._is_running:
+            return  # Escape can fire while idle
         self._cancel.set()
         self._cancel_btn.configure(state=tk.DISABLED)
         if self._pipeline:
