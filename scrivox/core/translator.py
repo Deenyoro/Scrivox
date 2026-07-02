@@ -3,7 +3,7 @@
 import copy
 import time
 
-from .llm_client import chat_completion
+from .llm_client import chat_completion, is_error_response
 
 # Header strings used by the formatter that should be translated
 # when "translate all content" is enabled.
@@ -23,68 +23,67 @@ TRANSLATABLE_HEADERS = [
 def _parse_numbered_lines(response_text, expected_count):
     """Parse numbered-line response back into a list of strings.
 
-    Accepts formats like:
-        1: translated text
-        2: translated text
-    Or just plain lines (one per input) as fallback.
+    Accepts "N: text" / "N. text" where N must be the next sequential item
+    number — a translation that legitimately starts with "12." (a date) or
+    "1:30" (a time) cannot hijack the numbering. Lines without a valid prefix
+    are treated as continuations of the previous item, not dropped.
+
+    Returns None when the response cannot be aligned to expected_count.
+    Callers must then keep the original untranslated strings — misaligned
+    translations attached to the wrong timestamps are worse than no
+    translation.
     """
     lines = response_text.strip().split("\n")
-    result = {}
+    items = {}
 
-    for line in lines:
-        line = line.strip()
+    for raw in lines:
+        line = raw.strip()
         if not line:
             continue
-        # Try "N: text" format — only match if prefix is a plausible line number
-        if ":" in line:
-            parts = line.split(":", 1)
+        matched = False
+        for sep in (":", "."):
+            prefix, found, rest = line.partition(sep)
+            if not found:
+                continue
             try:
-                num = int(parts[0].strip())
-                if 1 <= num <= expected_count:
-                    text = parts[1].strip()
-                    result[num] = text
-                    continue
+                num = int(prefix.strip())
             except ValueError:
-                pass
-        # Try "N. text" format
-        if "." in line:
-            parts = line.split(".", 1)
-            try:
-                num = int(parts[0].strip())
-                if 1 <= num <= expected_count:
-                    text = parts[1].strip()
-                    result[num] = text
-                    continue
-            except ValueError:
-                pass
+                continue
+            # Require "N: text" shape (space or end after the separator) —
+            # a bare "1:30" (time) or "12.," is content, not numbering
+            if rest and not rest[0].isspace():
+                continue
+            if num == len(items) + 1 and num <= expected_count:
+                items[num] = rest.strip()
+                matched = True
+            break
+        if not matched and items and len(items) < expected_count:
+            # Continuation of the previous item (model wrapped a line).
+            # Once all items are parsed, unnumbered lines are trailing
+            # commentary ("Note: ...") and must not be glued to the last item.
+            items[len(items)] = (items[len(items)] + " " + line).strip()
 
-    # If we got the right count via numbered parsing, use it
-    if len(result) >= expected_count:
-        return [result.get(i + 1, "") for i in range(expected_count)]
+    if len(items) == expected_count:
+        return [items[i + 1] for i in range(expected_count)]
 
-    # Fallback: strip numbering prefixes and use line-by-line
+    # Fallback: plain lines, one per input — only when the count matches
+    # exactly. Strip a numbered prefix only if it matches the line's position.
+    plain = [l.strip() for l in lines if l.strip()]
+    if len(plain) != expected_count:
+        return None
     cleaned = []
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        # Strip leading "N: " or "N. " only if N is a plausible line number
-        for sep in [":", "."]:
-            if sep in line:
-                prefix, rest = line.split(sep, 1)
+    for idx, line in enumerate(plain):
+        for sep in (":", "."):
+            prefix, found, rest = line.partition(sep)
+            if found and (not rest or rest[0].isspace()):
                 try:
-                    num = int(prefix.strip())
-                    if 1 <= num <= expected_count:
+                    if int(prefix.strip()) == idx + 1:
                         line = rest.strip()
                         break
                 except ValueError:
                     pass
         cleaned.append(line)
-
-    # Pad or truncate to expected count
-    while len(cleaned) < expected_count:
-        cleaned.append("")
-    return cleaned[:expected_count]
+    return cleaned
 
 
 def translate_segments(segments, target_language, api_key, translation_model,
@@ -132,10 +131,11 @@ def translate_segments(segments, target_language, api_key, translation_model,
         on_progress(f"  Translating batch {batch_idx + 1}/{total_batches} "
                     f"({len(batch)} segments)...")
 
-        # Build numbered lines
+        # Build numbered lines — flatten any embedded newlines or the
+        # one-line-per-item protocol breaks
         numbered_lines = []
         for i, seg in enumerate(batch):
-            numbered_lines.append(f"{i + 1}: {seg['text']}")
+            numbered_lines.append(f"{i + 1}: {' '.join(seg['text'].split())}")
         numbered_text = "\n".join(numbered_lines)
 
         source_hint = f" from {source_language}" if source_language else ""
@@ -167,8 +167,10 @@ def translate_segments(segments, target_language, api_key, translation_model,
         )
 
         batch_translations = None
-        if response_text and not response_text.startswith("["):
+        if not is_error_response(response_text):
             batch_translations = _parse_numbered_lines(response_text, len(batch))
+            if batch_translations is None:
+                on_progress("  Warning: Could not align translated lines — keeping originals for this batch")
         elif response_text:
             on_progress(f"  Warning: {response_text}")
 
@@ -222,7 +224,7 @@ def translate_text(text, target_language, api_key, translation_model,
         timeout=120,
     )
 
-    if result and not result.startswith("["):
+    if not is_error_response(result):
         return result
 
     on_progress(f"  Warning: Text translation failed: {result}")
@@ -250,7 +252,9 @@ def translate_strings(strings, target_language, api_key, translation_model,
         end = min(start + batch_size, len(strings))
         batch = strings[start:end]
 
-        numbered_lines = [f"{i + 1}: {s}" for i, s in enumerate(batch)]
+        # Flatten multi-line strings (e.g. long vision descriptions) — the
+        # numbered protocol requires one line per item
+        numbered_lines = [f"{i + 1}: {' '.join(s.split())}" for i, s in enumerate(batch)]
         numbered_text = "\n".join(numbered_lines)
 
         source_hint = f" from {source_language}" if source_language else ""
@@ -274,8 +278,11 @@ def translate_strings(strings, target_language, api_key, translation_model,
             timeout=60,
         )
 
-        if result and not result.startswith("["):
+        if not is_error_response(result):
             batch_results = _parse_numbered_lines(result, len(batch))
+            if batch_results is None:
+                on_progress("  Warning: Could not align translated strings — keeping originals for this batch")
+                batch_results = list(batch)
             results.extend(batch_results)
         else:
             on_progress(f"  Warning: String translation failed: {result}")

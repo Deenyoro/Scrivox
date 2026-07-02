@@ -12,10 +12,11 @@ from .media import extract_wav
 
 
 def _get_bundled_models_dir():
-    """Check for bundled models directory next to the exe or project root.
+    """Check for bundled diarization models next to the exe or project root.
 
-    Looks for a 'models' directory containing pre-downloaded HuggingFace models.
-    Users can also place their own models here to avoid needing an HF token.
+    Only counts a 'models' directory that actually contains HuggingFace hub
+    models (models/hub/models--*). A bare 'models/whisper/' directory for
+    custom Whisper models must NOT trigger the bundled-diarization path.
 
     Returns the path if found, or None.
     """
@@ -27,27 +28,42 @@ def _get_bundled_models_dir():
         base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
     models_dir = os.path.join(base, "models")
-    if os.path.isdir(models_dir):
-        return models_dir
+    hub_dir = os.path.join(models_dir, "hub")
+    try:
+        if os.path.isdir(hub_dir) and any(
+            e.startswith("models--") for e in os.listdir(hub_dir)
+        ):
+            return models_dir
+    except OSError:
+        pass
     return None
 
 
-def _setup_bundled_cache():
-    """Point HuggingFace Hub cache to bundled models directory if available.
+_HF_ENV_KEYS = ("HF_HOME", "HF_HUB_CACHE", "HF_HUB_OFFLINE")
 
-    Sets env vars as a safety net to discourage any HF code from going online.
-    The actual model loading bypasses HF Hub entirely via local path resolution.
 
-    Returns True if bundled models were found and configured.
+def _apply_bundled_hf_env(models_dir):
+    """Point HF Hub at bundled models and force offline mode.
+
+    Returns the previous env values so the caller can restore them after
+    diarization — a permanent HF_HUB_OFFLINE=1 would break later Whisper
+    model downloads in a long-lived GUI process. Applied for the whole
+    diarization run (load AND inference), since pyannote components may
+    defer hub/cache resolution past construction.
     """
-    models_dir = _get_bundled_models_dir()
-    if models_dir:
-        hub_dir = os.path.join(models_dir, "hub")
-        os.environ["HF_HOME"] = models_dir
-        os.environ["HF_HUB_CACHE"] = hub_dir
-        os.environ["HF_HUB_OFFLINE"] = "1"
-        return True
-    return False
+    saved = {k: os.environ.get(k) for k in _HF_ENV_KEYS}
+    os.environ["HF_HOME"] = models_dir
+    os.environ["HF_HUB_CACHE"] = os.path.join(models_dir, "hub")
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    return saved
+
+
+def _restore_hf_env(saved):
+    for k, v in saved.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
 
 
 def _resolve_snapshot(model_id, hub_dir):
@@ -113,32 +129,33 @@ def diarize_audio(audio_path, hf_token, num_speakers=None, min_speakers=None,
         diarization_model = DEFAULT_DIARIZATION_MODEL
         on_progress("Upgraded diarization model from 3.1 to community-1 (pyannote 4.0)")
 
-    # Set env vars BEFORE importing pyannote as a safety net.
-    has_bundled = _setup_bundled_cache()
+    bundled_models_dir = _get_bundled_models_dir()
+    has_bundled = bundled_models_dir is not None
+    _saved_hf_env = _apply_bundled_hf_env(bundled_models_dir) if has_bundled else None
 
     wav_path = None
     ext = os.path.splitext(audio_path)[1].lower()
-    if ext not in (".wav", ".wave"):
-        wav_path = extract_wav(audio_path, track_index=audio_track,
-                               on_progress=on_progress)
-        wav_file = wav_path
-    else:
-        wav_file = audio_path
-
-    # Pre-load audio as a waveform tensor so pyannote never touches
-    # torchcodec's AudioDecoder (broken on Windows / PyInstaller).
-    # Use soundfile instead of torchaudio — torchaudio 2.10+ delegates to
-    # torchcodec internally, which fails in bundled builds.
-    import soundfile as sf
-    data, sample_rate = sf.read(wav_file, dtype="float32")
-    if data.ndim > 1:
-        # User-supplied multi-channel WAV (extracted WAVs are already mono):
-        # downmix so the tensor is (1, samples) as pyannote expects.
-        data = data.mean(axis=1)
-    waveform = torch.from_numpy(data).unsqueeze(0)  # (samples,) -> (1, samples)
-    diarize_input = {"waveform": waveform, "sample_rate": sample_rate}
-
     try:
+        if ext not in (".wav", ".wave"):
+            wav_path = extract_wav(audio_path, track_index=audio_track,
+                                   on_progress=on_progress)
+            wav_file = wav_path
+        else:
+            wav_file = audio_path
+
+        # Pre-load audio as a waveform tensor so pyannote never touches
+        # torchcodec's AudioDecoder (broken on Windows / PyInstaller).
+        # Use soundfile instead of torchaudio — torchaudio 2.10+ delegates to
+        # torchcodec internally, which fails in bundled builds.
+        import soundfile as sf
+        data, sample_rate = sf.read(wav_file, dtype="float32")
+        if data.ndim > 1:
+            # User-supplied multi-channel WAV (extracted WAVs are already mono):
+            # downmix so the tensor is (1, samples) as pyannote expects.
+            data = data.mean(axis=1)
+        waveform = torch.from_numpy(data).unsqueeze(0)  # (samples,) -> (1, samples)
+        diarize_input = {"waveform": waveform, "sample_rate": sample_rate}
+
         if has_bundled:
             on_progress("Using bundled diarization models...")
         else:
@@ -149,7 +166,7 @@ def diarize_audio(audio_path, hf_token, num_speakers=None, min_speakers=None,
             # Bundled models — resolve local paths and load directly from disk.
             # This bypasses HuggingFace Hub entirely: no cache lookups, no
             # token checks, no network access.
-            bundled_hub = os.path.join(_get_bundled_models_dir(), "hub")
+            bundled_hub = os.path.join(bundled_models_dir, "hub")
             pipeline = _load_bundled_pipeline(
                 diarization_model, bundled_hub, on_progress=on_progress,
             )
@@ -215,6 +232,8 @@ def diarize_audio(audio_path, hf_token, num_speakers=None, min_speakers=None,
         return speaker_segments
 
     finally:
+        if _saved_hf_env is not None:
+            _restore_hf_env(_saved_hf_env)
         if wav_path and os.path.exists(wav_path):
             os.remove(wav_path)
 

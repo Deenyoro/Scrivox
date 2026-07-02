@@ -38,17 +38,27 @@ def check_ffmpeg(on_progress=print):
 
 
 def has_video_stream(file_path):
-    """Use ffprobe to check if file actually contains a video stream."""
+    """Use ffprobe to check if file contains a real video stream.
+
+    Embedded cover art (attached_pic, e.g. album art in MP3/M4A) does not count —
+    otherwise vision analysis would burn API calls describing a static image.
+    """
     try:
         result = subprocess.run(
-            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+            ["ffprobe", "-v", "error", "-select_streams", "v",
              "-show_entries", "stream=codec_type",
-             "-of", "default=noprint_wrappers=1:nokey=1", file_path],
-            capture_output=True, text=True, timeout=10,
+             "-show_entries", "stream_disposition=attached_pic",
+             "-of", "json", file_path],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=10,
             **_subprocess_flags(),
         )
-        return result.stdout.strip() == "video"
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+        streams = _json.loads(result.stdout or "{}").get("streams", [])
+        return any(
+            not s.get("disposition", {}).get("attached_pic", 0)
+            for s in streams
+        )
+    except (subprocess.TimeoutExpired, FileNotFoundError, _json.JSONDecodeError):
         return os.path.splitext(file_path)[1].lower() in VIDEO_EXTENSIONS
 
 
@@ -58,7 +68,8 @@ def get_media_duration(file_path):
         result = subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries", "format=duration",
              "-of", "default=noprint_wrappers=1:nokey=1", file_path],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=10,
             **_subprocess_flags(),
         )
         return float(result.stdout.strip())
@@ -78,7 +89,8 @@ def list_audio_tracks(file_path):
              "-show_entries", "stream_tags=language,title",
              "-show_entries", "stream_disposition=default",
              "-of", "json", file_path],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=15,
             **_subprocess_flags(),
         )
         data = _json.loads(result.stdout)
@@ -114,16 +126,23 @@ def extract_wav(input_path, track_index=0, on_progress=print):
     os.close(fd)
     on_progress(f"Extracting audio to WAV (track {track_index})...")
     try:
-        subprocess.run(
+        result = subprocess.run(
             ["ffmpeg", "-y", "-i", input_path,
              "-map", f"0:a:{track_index}",
              "-ac", "1", "-ar", "16000", "-vn", wav_path],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True,
+            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            encoding="utf-8", errors="replace", check=True,
             timeout=600,
             **_subprocess_flags(),
         )
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
         if os.path.exists(wav_path):
             os.remove(wav_path)
-        raise
+        from .pipeline import PipelineError
+        if isinstance(e, subprocess.TimeoutExpired):
+            raise PipelineError(f"ffmpeg timed out extracting audio from {input_path}")
+        stderr_tail = "\n".join((e.stderr or "").strip().splitlines()[-5:])
+        raise PipelineError(
+            f"ffmpeg failed to extract audio track {track_index} from {input_path}:\n{stderr_tail}"
+        )
     return wav_path

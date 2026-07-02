@@ -55,9 +55,11 @@ jobs:
       - name: Determine tag name
         id: tag
         shell: bash
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag_name }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "TAG=${{ github.event.inputs.tag_name }}" >> $GITHUB_OUTPUT
+            echo "TAG=$INPUT_TAG" >> $GITHUB_OUTPUT
           else
             echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           fi
@@ -70,7 +72,9 @@ jobs:
         shell: bash
         run: |
           if [ -d "./dist/Scrivox-Lite" ]; then
-            7z a "Scrivox-Lite-${{ steps.tag.outputs.TAG }}-win64.7z" ./dist/Scrivox-Lite/*
+            # Archive from inside the dir so dotfiles (.env.example) are included
+            # (a bash glob like dir/* silently skips them)
+            (cd ./dist/Scrivox-Lite && 7z a "$GITHUB_WORKSPACE/Scrivox-Lite-${{ steps.tag.outputs.TAG }}-win64.7z" .)
           else
             echo "Lite build directory not found, skipping archive"
             exit 1
@@ -84,7 +88,7 @@ jobs:
         shell: bash
         run: |
           if [ -d "./dist/Scrivox" ]; then
-            7z a "Scrivox-${{ steps.tag.outputs.TAG }}-win64.7z" ./dist/Scrivox/*
+            (cd ./dist/Scrivox && 7z a "$GITHUB_WORKSPACE/Scrivox-${{ steps.tag.outputs.TAG }}-win64.7z" .)
           else
             echo "Regular build directory not found, skipping archive"
             exit 1
@@ -100,7 +104,7 @@ jobs:
         shell: bash
         run: |
           if [ -d "./dist/Scrivox-Full" ]; then
-            7z a "Scrivox-Full-${{ steps.tag.outputs.TAG }}-win64.7z" ./dist/Scrivox-Full/*
+            (cd ./dist/Scrivox-Full && 7z a "$GITHUB_WORKSPACE/Scrivox-Full-${{ steps.tag.outputs.TAG }}-win64.7z" .)
           else
             echo "Full build directory not found, skipping archive"
             exit 1

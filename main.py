@@ -11,9 +11,9 @@ import sys
 # Libraries (pyannote, torch, etc.) crash when they try to print/write.
 # Redirect to devnull so nothing breaks.
 if sys.stdout is None:
-    sys.stdout = open(os.devnull, "w")
+    sys.stdout = open(os.devnull, "w", encoding="utf-8", errors="replace")
 if sys.stderr is None:
-    sys.stderr = open(os.devnull, "w")
+    sys.stderr = open(os.devnull, "w", encoding="utf-8", errors="replace")
 
 
 def _attach_console():
@@ -30,9 +30,11 @@ def _attach_console():
             kernel32 = ctypes.windll.kernel32
             # Try to attach to parent process console
             if kernel32.AttachConsole(-1):  # ATTACH_PARENT_PROCESS = -1
-                # Reopen stdout/stderr to the attached console
-                sys.stdout = open("CONOUT$", "w", encoding="utf-8", errors="replace", closefd=False)
-                sys.stderr = open("CONOUT$", "w", encoding="utf-8", errors="replace", closefd=False)
+                # Reopen stdout/stderr to the attached console.
+                # closefd=False is illegal with a filename and would raise,
+                # leaving CLI output bound to devnull.
+                sys.stdout = open("CONOUT$", "w", encoding="utf-8", errors="replace")
+                sys.stderr = open("CONOUT$", "w", encoding="utf-8", errors="replace")
         except Exception:
             pass
 

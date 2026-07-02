@@ -54,6 +54,13 @@ class ScrivoxApp(tk.Tk):
         self._original_stdout = sys.stdout
 
         self._build_ui()
+
+        # Route stray library prints (model downloads, tqdm, ffmpeg helpers)
+        # into the log — in a windowed exe they would otherwise vanish
+        from .log_redirect import LogRedirect
+        sys.stdout = LogRedirect(self.log_frame, self,
+                                 original_stdout=self._original_stdout)
+
         self._load_saved_settings()
         self._setup_keyboard_shortcuts()
         self.after(100, self._run_preflight_checks)
@@ -229,48 +236,62 @@ class ScrivoxApp(tk.Tk):
 
     def _setup_keyboard_shortcuts(self):
         """Bind keyboard shortcuts."""
-        self.bind_all("<Control-o>", lambda e: self.queue_frame.browse_files())
+        # Queue is locked while running — Ctrl+O must respect that too
+        self.bind_all("<Control-o>",
+                      lambda e: None if self._is_running else self.queue_frame.browse_files())
         self.bind_all("<Control-Return>", lambda e: self._start_pipeline())
         self.bind_all("<Escape>", lambda e: self._cancel_pipeline())
         self.bind_all("<Control-l>", lambda e: self.log_frame.clear())
 
     def _run_preflight_checks(self):
-        """Check ffmpeg and GPU availability on startup, update status bar."""
-        parts = []
+        """Check ffmpeg and GPU availability on startup, update status bar.
 
-        # Determine CUDA source label
-        if getattr(sys, "frozen", False):
-            _flag = os.path.join(sys._MEIPASS, '..', 'use_system_cuda')
-        else:
-            _flag = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.dirname(
-                    os.path.abspath(__file__)))),
-                'use_system_cuda')
-        cuda_source = "system" if os.path.isfile(_flag) else "bundled"
+        Runs in a daemon thread — `import torch` takes several seconds and
+        would freeze the freshly-opened window.
+        """
+        self._status_bar.configure(text="Checking GPU and ffmpeg...")
 
-        # GPU check
-        try:
-            import torch
-            if torch.cuda.is_available():
-                gpu_name = torch.cuda.get_device_name(0)
-                cuda_ver = torch.version.cuda or "unknown"
-                parts.append(f"GPU: {gpu_name} | CUDA {cuda_ver} ({cuda_source})")
+        def _check():
+            parts = []
+
+            # Determine CUDA source label
+            if getattr(sys, "frozen", False):
+                _flag = os.path.join(sys._MEIPASS, '..', 'use_system_cuda')
             else:
-                parts.append("GPU: No CUDA device found")
-        except Exception:
-            parts.append("GPU: torch not available")
+                _flag = os.path.join(
+                    os.path.dirname(os.path.dirname(os.path.dirname(
+                        os.path.abspath(__file__)))),
+                    'use_system_cuda')
+            cuda_source = "system" if os.path.isfile(_flag) else "bundled"
 
-        # ffmpeg check
-        try:
-            from ..core.media import _subprocess_flags
-            subprocess.run(["ffmpeg", "-version"],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3,
-                           **_subprocess_flags())
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            parts.append("ffmpeg: NOT FOUND")
+            # GPU check
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    gpu_name = torch.cuda.get_device_name(0)
+                    cuda_ver = torch.version.cuda or "unknown"
+                    parts.append(f"GPU: {gpu_name} | CUDA {cuda_ver} ({cuda_source})")
+                else:
+                    parts.append("GPU: No CUDA device found")
+            except Exception:
+                parts.append("GPU: torch not available")
 
-        parts.append(f"{__app_name__} v{__version__} ({self._variant})")
-        self._status_bar.configure(text=" | ".join(parts))
+            # ffmpeg check
+            try:
+                from ..core.media import _subprocess_flags
+                subprocess.run(["ffmpeg", "-version"],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3,
+                               **_subprocess_flags())
+            except (FileNotFoundError, subprocess.TimeoutExpired):
+                parts.append("ffmpeg: NOT FOUND")
+
+            parts.append(f"{__app_name__} v{__version__} ({self._variant})")
+            try:
+                self.after(0, lambda: self._status_bar.configure(text=" | ".join(parts)))
+            except Exception:
+                pass  # window closed during startup checks
+
+        threading.Thread(target=_check, daemon=True).start()
 
     def _show_track_dialog(self, filepath, tracks):
         """Show track selection dialog. Returns list of selected track indices."""
@@ -289,6 +310,8 @@ class ScrivoxApp(tk.Tk):
         fmt = settings.get("output_format", "txt")
         if fmt in OUTPUT_FORMATS:
             self.output_frame.format_var.set(fmt)
+        self.output_frame.subtitle_speakers_var.set(
+            bool(settings.get("subtitle_speakers", False)))
 
     def _save_current_settings(self):
         """Save current settings to config."""
@@ -296,6 +319,7 @@ class ScrivoxApp(tk.Tk):
         if self.models_frame:
             settings.update(self.models_frame.get_settings_dict())
         settings["output_format"] = self.output_frame.format_var.get()
+        settings["subtitle_speakers"] = self.output_frame.subtitle_speakers_var.get()
         self.config_manager.save_last_settings(**settings)
         if self.api_frame:
             self.api_frame.save_to_config()
@@ -460,66 +484,96 @@ class ScrivoxApp(tk.Tk):
         self.progress_frame.start()
 
         jobs = self.queue_frame.get_jobs()
+        total_jobs = len(jobs)
+
+        # Build every job's config NOW, on the main thread: Tk variables must
+        # not be read from the worker thread, and snapshotting up front means
+        # mid-run widget edits can't silently change later jobs.
+        explicit_output = self.output_frame.output_path_var.get()
+        fmt = self.output_frame.format_var.get()
+        default_ext = f".{fmt}" if fmt in OUTPUT_FORMATS else ".txt"
+        configs = []
+        used_paths = set()
+        for job in jobs:
+            config = self._build_config(job)
+            if total_jobs > 1:
+                suffix = f"_track{job.audio_track}" if job.audio_track > 0 else ""
+                if explicit_output:
+                    # One explicit path + many jobs would overwrite the same
+                    # file for every job — derive a unique path per job
+                    out_base, out_ext = os.path.splitext(explicit_output)
+                    job_stem = os.path.splitext(os.path.basename(job.file_path))[0]
+                    candidate = f"{out_base}_{job_stem}{suffix}{out_ext or default_ext}"
+                else:
+                    base = os.path.splitext(job.file_path)[0]
+                    candidate = f"{base}{suffix}{default_ext}"
+                # Same-stem inputs from different folders (a\meeting.mp4 and
+                # b\meeting.mp4) must not collide on one output file
+                unique, n = candidate, 2
+                while os.path.normcase(unique) in used_paths:
+                    cand_base, cand_ext = os.path.splitext(candidate)
+                    unique = f"{cand_base}_{n}{cand_ext}"
+                    n += 1
+                used_paths.add(os.path.normcase(unique))
+                config.output_path = unique
+            configs.append(config)
 
         def _run_batch():
             results = []
-            total_jobs = len(jobs)
+            try:
+                for i, (job, config) in enumerate(zip(jobs, configs)):
+                    if self._cancel.is_set():
+                        self.after(0, self._on_pipeline_cancelled)
+                        return
 
-            for i, job in enumerate(jobs):
-                if self._cancel.is_set():
-                    self.after(0, self._on_pipeline_cancelled)
-                    return
+                    # Update file-level progress
+                    filename = os.path.basename(job.file_path)
+                    track_info = f" ({job.track_label})" if job.track_label else ""
+                    self.after(0, self.progress_frame.update_file,
+                               i + 1, total_jobs, f"{filename}{track_info}")
+                    self.after(0, self.queue_frame.set_job_status, i, "running")
 
-                # Update file-level progress
-                filename = os.path.basename(job.file_path)
-                track_info = f" ({job.track_label})" if job.track_label else ""
-                self.after(0, self.progress_frame.update_file,
-                           i + 1, total_jobs, f"{filename}{track_info}")
-                self.after(0, self.queue_frame.set_job_status, i, "running")
+                    # Add job separator in log
+                    if i > 0:
+                        self._on_progress("\n" + "=" * 60)
+                        self._on_progress(f"  JOB {i + 1}/{total_jobs}")
+                        self._on_progress("=" * 60)
 
-                # Add job separator in log
-                if i > 0:
-                    self._on_progress("\n" + "=" * 60)
-                    self._on_progress(f"  JOB {i + 1}/{total_jobs}")
-                    self._on_progress("=" * 60)
+                    pipeline = TranscriptionPipeline(
+                        config,
+                        on_progress=self._on_progress,
+                        on_step=self._on_step,
+                        cancel_event=self._cancel,
+                    )
+                    self._pipeline = pipeline
 
-                config = self._build_config(job)
+                    try:
+                        result = pipeline.run()
+                        self.after(0, self.queue_frame.set_job_status, i, "done")
+                        results.append(result)
+                    except PipelineCancelled:
+                        self.after(0, self.queue_frame.set_job_status, i, "cancelled")
+                        self.after(0, self._on_pipeline_cancelled)
+                        return
+                    except PipelineError as e:
+                        self.after(0, self.queue_frame.set_job_status, i, "error")
+                        self._on_progress(f"ERROR: {e}")
+                        # Continue to next job on error
+                        continue
+                    except Exception as e:
+                        self.after(0, self.queue_frame.set_job_status, i, "error")
+                        self._on_progress(f"ERROR: {type(e).__name__}: {e}")
+                        continue
 
-                # For batch with no explicit output path, auto-generate per-job
-                if total_jobs > 1 and not self.output_frame.output_path_var.get():
-                    base = os.path.splitext(job.file_path)[0]
-                    fmt = self.output_frame.format_var.get()
-                    ext_map = {"txt": ".txt", "md": ".md", "srt": ".srt",
-                               "vtt": ".vtt", "json": ".json", "tsv": ".tsv"}
-                    suffix = f"_track{job.audio_track}" if job.audio_track > 0 else ""
-                    config.output_path = f"{base}{suffix}{ext_map.get(fmt, '.txt')}"
-
-                pipeline = TranscriptionPipeline(
-                    config,
-                    on_progress=self._on_progress,
-                    on_step=self._on_step,
-                )
-                self._pipeline = pipeline
-
+                self.after(0, self._on_batch_complete, results)
+            except Exception as e:
+                # Anything unexpected must still release the UI — otherwise
+                # the Start button stays disabled until app restart
+                self._on_progress(f"FATAL: {type(e).__name__}: {e}")
                 try:
-                    result = pipeline.run()
-                    self.after(0, self.queue_frame.set_job_status, i, "done")
-                    results.append(result)
-                except PipelineCancelled:
-                    self.after(0, self.queue_frame.set_job_status, i, "error")
-                    self.after(0, self._on_pipeline_cancelled)
-                    return
-                except PipelineError as e:
-                    self.after(0, self.queue_frame.set_job_status, i, "error")
-                    self._on_progress(f"ERROR: {e}")
-                    # Continue to next job on error
-                    continue
-                except Exception as e:
-                    self.after(0, self.queue_frame.set_job_status, i, "error")
-                    self._on_progress(f"ERROR: {type(e).__name__}: {e}")
-                    continue
-
-            self.after(0, self._on_batch_complete, results)
+                    self.after(0, self._on_batch_complete, results)
+                except Exception:
+                    pass
 
         self._pipeline_thread = threading.Thread(target=_run_batch, daemon=True)
         self._pipeline_thread.start()
@@ -581,4 +635,5 @@ class ScrivoxApp(tk.Tk):
                 self._pipeline.cancel()
 
         self._save_current_settings()
+        sys.stdout = self._original_stdout
         self.destroy()

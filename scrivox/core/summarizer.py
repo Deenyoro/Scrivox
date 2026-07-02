@@ -3,7 +3,15 @@
 import time
 
 from .formatter import format_timestamp_human
-from .llm_client import chat_completion
+from .llm_client import chat_completion, is_error_response
+
+
+def _truncate_middle(text, max_chars, marker):
+    """Keep the head and tail of text, dropping the middle past max_chars."""
+    if len(text) <= max_chars:
+        return text
+    half = max_chars // 2
+    return text[:half] + f"\n\n{marker}\n\n" + text[-half:]
 
 
 def generate_meeting_summary(segments, api_key, summary_model, diarized=False,
@@ -28,14 +36,13 @@ def generate_meeting_summary(segments, api_key, summary_model, diarized=False,
             context_lines.append(f"[{ts}] {vc['description']}")
         context_section = "\n\nVisual context from the video:\n" + "\n".join(context_lines)
 
-    max_chars = 80000
-    if len(transcript_text) > max_chars:
-        half = max_chars // 2
-        transcript_text = (
-            transcript_text[:half]
-            + "\n\n[... middle portion omitted for length ...]\n\n"
-            + transcript_text[-half:]
-        )
+    transcript_text = _truncate_middle(
+        transcript_text, 80000, "[... middle portion omitted for length ...]")
+    # Vision descriptions can be very long (8k-token budget per frame) — cap
+    # the context section too, or vision-heavy runs overflow the model context
+    # and the summary fails entirely
+    context_section = _truncate_middle(
+        context_section, 60000, "[... middle visual context omitted for length ...]")
 
     prompt = f"""Analyze this meeting transcript and provide a structured summary.
 
@@ -76,7 +83,7 @@ Be concise and factual. Only include information actually present in the transcr
         timeout=120,
     )
 
-    if result is None or result.startswith("["):
+    if is_error_response(result):
         on_progress(f"Warning: Summary generation failed: {result}")
         return None
 

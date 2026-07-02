@@ -160,7 +160,8 @@ In the GUI, select your provider from the dropdown in the API Keys section.
 python main.py <input> [options]
 
 Options:
-  --model MODEL              Whisper model: tiny, base, small, medium, large-v3
+  --model MODEL              Whisper model: tiny, base, small, medium, large-v3,
+                             large-v3-turbo, distil-large-v3.5
   --language LANG            Primary language code (en, ko, ja, etc.) or auto-detect
   --format FORMAT            Output: txt, md, srt, vtt, json, tsv
   --output PATH, -o PATH     Output file path

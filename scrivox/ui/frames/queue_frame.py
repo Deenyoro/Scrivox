@@ -112,7 +112,7 @@ class QueueFrame(ttk.LabelFrame):
                 if end == -1:
                     break  # malformed drop data
                 paths.append(raw[i + 1:end])
-                i = end + 2  # skip closing brace and space
+                i = end + 1  # the whitespace branch skips any separator space
             elif raw[i] == " ":
                 i += 1
             else:
@@ -128,6 +128,8 @@ class QueueFrame(ttk.LabelFrame):
 
     def browse_files(self):
         """Open multi-file dialog and add selected files to the queue."""
+        if not self._enabled:
+            return  # queue is locked while a batch is running
         all_exts = sorted(VIDEO_EXTENSIONS | AUDIO_EXTENSIONS)
         ext_pattern = " ".join(f"*{e}" for e in all_exts)
 
@@ -151,6 +153,15 @@ class QueueFrame(ttk.LabelFrame):
             for path in paths:
                 self._add_file(path)
 
+    def _is_queued(self, path, audio_track):
+        """True if the same file+track combination is already in the queue."""
+        norm = os.path.normcase(os.path.abspath(path))
+        return any(
+            os.path.normcase(os.path.abspath(j.file_path)) == norm
+            and j.audio_track == audio_track
+            for j in self._jobs
+        )
+
     def _add_file(self, path):
         """Add a file to the job queue, prompting for track selection if multi-track video."""
         tracks = list_audio_tracks(path)
@@ -160,6 +171,8 @@ class QueueFrame(ttk.LabelFrame):
             if not selected_indices:
                 return  # user cancelled
             for idx in selected_indices:
+                if self._is_queued(path, idx):
+                    continue  # duplicate jobs race on the same output path
                 track = tracks[idx] if idx < len(tracks) else tracks[0]
                 label = self._format_track_label(track)
                 job = JobConfig(
@@ -171,6 +184,8 @@ class QueueFrame(ttk.LabelFrame):
                 self._insert_tree_row(job)
         else:
             # Single track or no tracks detected
+            if self._is_queued(path, 0):
+                return
             label = ""
             if tracks:
                 label = self._format_track_label(tracks[0])
@@ -236,6 +251,7 @@ class QueueFrame(ttk.LabelFrame):
                 "running": "Running...",
                 "done": "Done",
                 "error": "Error",
+                "cancelled": "Cancelled",
             }
             values[3] = status_map.get(status, status)
             self._tree.item(item, values=values)

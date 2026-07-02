@@ -20,6 +20,7 @@ Options:
 """
 
 import argparse
+import os
 import re
 import sys
 import time
@@ -225,5 +226,7 @@ def main():
 
 if __name__ == "__main__":
     import keyboard
-    keyboard.add_hotkey("ctrl+shift+q", lambda: sys.exit(0))
+    # sys.exit() in a hotkey callback only kills the keyboard event thread —
+    # it can never quit the app. os._exit terminates the whole process.
+    keyboard.add_hotkey("ctrl+shift+q", lambda: (print("\nGoodbye!"), os._exit(0)))
     main()

@@ -40,7 +40,7 @@ def download_diarization_models(models_dir):
     if not hf_token:
         print("Error: HF_TOKEN environment variable required to download models.", file=sys.stderr)
         print("Set it with: set HF_TOKEN=hf_your_token_here", file=sys.stderr)
-        sys.exit(1)
+        return False
 
     hub_dir = os.path.join(models_dir, "hub")
     os.makedirs(hub_dir, exist_ok=True)
@@ -74,6 +74,10 @@ def download_diarization_models(models_dir):
 
     except Exception as e:
         print(f"Error downloading models: {e}", file=sys.stderr)
+        # Remove the partial download so a stale dir can't make the next build
+        # skip the download and ship a broken Full variant. Only hub/ — the
+        # models/ dir may also hold the user's custom Whisper models.
+        shutil.rmtree(hub_dir, ignore_errors=True)
         return False
 
 
@@ -177,9 +181,22 @@ def main():
 
     # ── Full build (with models) ──
     full_explicitly_requested = args.full
+    def _models_present():
+        """A valid bundle has hub/models--* inside — a bare dir doesn't count.
+
+        Mirrors scrivox/core/diarizer._get_bundled_models_dir (which can't be
+        imported here without pulling in torch) — keep the two in sync.
+        """
+        hub = os.path.join(models_dir, "hub")
+        try:
+            return os.path.isdir(hub) and any(
+                e.startswith("models--") for e in os.listdir(hub))
+        except OSError:
+            return False
+
     if build_full:
         # Download models if not already present
-        if not os.path.isdir(models_dir):
+        if not _models_present():
             if not download_diarization_models(models_dir):
                 if full_explicitly_requested:
                     print("Full build failed: model download failed.", file=sys.stderr)

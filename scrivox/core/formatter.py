@@ -77,17 +77,35 @@ def _split_at_punctuation(text):
 
 
 def _split_segment_by_words(seg, words, max_chars, max_duration, result,
-                            min_chars=15):
-    """Recursively split a segment using word timestamps at the best break point."""
+                            min_chars=15, _rebuilt=False):
+    """Recursively split a segment using word timestamps at the best break point.
+
+    Sub-segments rebuild their text from raw Whisper words, so leaf cues are
+    re-cleaned before emission (once per emitted cue, not per tree node) —
+    splitting must not resurrect hallucinated repeats/mojibake that
+    clean_transcription removed from seg["text"]. A leaf whose text cleans to
+    nothing (pure junk) is dropped.
+    """
+    def _emit(s):
+        if _rebuilt:
+            from .transcriber import clean_segment_text
+            cleaned = clean_segment_text(s["text"], language=s.get("language", ""),
+                                         capitalize_first=False)
+            if not cleaned:
+                return
+            s = dict(s)
+            s["text"] = cleaned
+        result.append(s)
+
     text = seg["text"].strip()
     duration = seg["end"] - seg["start"]
 
     if len(text) <= max_chars and duration <= max_duration:
-        result.append(seg)
+        _emit(seg)
         return
 
     if len(words) < 2:
-        result.append(seg)
+        _emit(seg)
         return
 
     # Find the best split point — prefer punctuation boundaries near the middle
@@ -117,10 +135,10 @@ def _split_segment_by_words(seg, words, max_chars, max_duration, result,
 
     if best_idx is None:
         # No valid split point that satisfies min_chars — keep as-is
-        result.append(seg)
+        _emit(seg)
         return
 
-    # Split into two sub-segments
+    # Split into two sub-segments (raw word text; leaves are cleaned at emit)
     left_words = words[:best_idx]
     right_words = words[best_idx:]
 
@@ -140,8 +158,10 @@ def _split_segment_by_words(seg, words, max_chars, max_duration, result,
     right_seg["words"] = right_words
 
     # Recurse in case sub-segments are still too long
-    _split_segment_by_words(left_seg, left_words, max_chars, max_duration, result)
-    _split_segment_by_words(right_seg, right_words, max_chars, max_duration, result)
+    _split_segment_by_words(left_seg, left_words, max_chars, max_duration, result,
+                            min_chars=min_chars, _rebuilt=True)
+    _split_segment_by_words(right_seg, right_words, max_chars, max_duration, result,
+                            min_chars=min_chars, _rebuilt=True)
 
 
 def _cap_subtitle_duration(segments, max_duration=4.0, min_duration=1.0,
@@ -210,12 +230,12 @@ def _merge_subtitle_segments(segments, max_chars=84, max_duration=4.0, max_gap=0
 
 
 def _wrap_subtitle_text(text, max_line=42):
-    """Wrap subtitle text to two lines for readability."""
+    """Wrap subtitle text into lines for readability (never drops text)."""
     if len(text) <= max_line:
         return text
     lines = textwrap.wrap(text, width=max_line,
                            break_long_words=False, break_on_hyphens=False)
-    return "\n".join(lines[:2])
+    return "\n".join(lines)
 
 
 def format_output(segments, fmt="txt", diarized=False, visual_context=None,

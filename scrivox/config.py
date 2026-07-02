@@ -60,6 +60,7 @@ _DEFAULT_CONFIG = {
         "subtitle_max_duration": 4.0,
         "subtitle_max_gap": 0.8,
         "subtitle_min_chars": 15,
+        "subtitle_speakers": False,
         "confidence_threshold": 0.50,
         "translate": False,
         "translate_all": False,
@@ -104,7 +105,7 @@ class ConfigManager:
                 for section in _DEFAULT_CONFIG:
                     if section in saved and isinstance(saved[section], dict):
                         self._data[section].update(saved[section])
-            except (json.JSONDecodeError, OSError):
+            except (json.JSONDecodeError, UnicodeDecodeError, OSError):
                 pass  # corrupt file, use defaults
 
     def save(self):

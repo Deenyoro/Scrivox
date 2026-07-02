@@ -11,7 +11,7 @@ DEFAULT_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv", ".wmv"}
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac", ".wma"}
 
-WHISPER_MODELS = ["tiny", "base", "small", "medium", "large-v3"]
+WHISPER_MODELS = ["tiny", "base", "small", "medium", "large-v3", "large-v3-turbo", "distil-large-v3.5"]
 OUTPUT_FORMATS = ["txt", "md", "srt", "vtt", "json", "tsv"]
 
 # LLM API providers
@@ -24,7 +24,7 @@ LLM_PROVIDERS = {
     "Ollama (local)": "http://localhost:11434/v1/chat/completions",
 }
 DEFAULT_LLM_PROVIDER = "OpenRouter"
-DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6-20250520"
+DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6"
 
 # Preset model lists for combobox dropdowns
 LLM_MODEL_PRESETS = [

@@ -12,11 +12,12 @@ from typing import Callable, List, Optional
 import torch
 
 from .constants import (
-    AUDIO_EXTENSIONS, DEFAULT_DIARIZATION_MODEL, DEFAULT_SUMMARY_MODEL,
-    DEFAULT_TRANSLATION_MODEL, DEFAULT_VISION_MODEL,
+    AUDIO_EXTENSIONS, DEFAULT_ANTHROPIC_MODEL, DEFAULT_DIARIZATION_MODEL,
+    DEFAULT_SUMMARY_MODEL, DEFAULT_TRANSLATION_MODEL, DEFAULT_VISION_MODEL,
     LANGUAGE_CODE_TO_NAME, TRANSLATION_CODE_TO_NAME,
     VIDEO_EXTENSIONS,
 )
+from .llm_client import is_anthropic_api
 from .media import check_ffmpeg, extract_wav, get_media_duration, has_video_stream
 from .transcriber import clean_transcription, transcribe_audio
 from .diarizer import assign_speakers, diarize_audio, rename_speakers, _get_bundled_models_dir
@@ -141,17 +142,20 @@ class TranscriptionPipeline:
     STEPS_OUTPUT = ["Format Output"]
 
     def __init__(self, config: PipelineConfig, on_progress: Callable = print,
-                 on_step: Optional[Callable] = None):
+                 on_step: Optional[Callable] = None,
+                 cancel_event: Optional[threading.Event] = None):
         """
         Args:
             config: Pipeline configuration
             on_progress: Callback for log messages (default: print)
             on_step: Callback for step changes: on_step(step_num, total_steps, step_name)
+            cancel_event: Optional shared Event — lets a GUI cancel a batch
+                without racing against which pipeline object is current
         """
         self.config = config
         self.on_progress = on_progress
         self.on_step = on_step or (lambda *a: None)
-        self._cancel = threading.Event()
+        self._cancel = cancel_event if cancel_event is not None else threading.Event()
 
     def cancel(self):
         """Request pipeline cancellation. Checked between steps."""
@@ -178,7 +182,6 @@ class TranscriptionPipeline:
     def run(self) -> PipelineResult:
         """Execute the full pipeline. Returns PipelineResult."""
         cfg = self.config
-        total_steps = self._count_steps()
         current_step = 0
 
         # ── Validate ──
@@ -220,11 +223,25 @@ class TranscriptionPipeline:
         if (cfg.vision or cfg.summarize or cfg.translate) and not openrouter_key and not is_local:
             raise PipelineError("Vision/Summary/Translation requires an LLM API key in .env or config")
 
+        # Anthropic's Messages API rejects OpenRouter-style model IDs — swap
+        # any model still at its stock default for the Anthropic default.
+        # Done here (not in the CLI) so GUI users on the Anthropic provider
+        # get working defaults too.
+        if is_anthropic_api(cfg.api_base):
+            for attr, stock in (("vision_model", DEFAULT_VISION_MODEL),
+                                ("summary_model", DEFAULT_SUMMARY_MODEL),
+                                ("translation_model", DEFAULT_TRANSLATION_MODEL)):
+                if getattr(cfg, attr) == stock:
+                    setattr(cfg, attr, DEFAULT_ANTHROPIC_MODEL)
+
         # Check video for vision
         is_video = has_video_stream(cfg.input_path)
         if cfg.vision and not is_video:
             self.on_progress("Warning: --vision requires a video file, skipping keyframe extraction")
             cfg.vision = False
+
+        # Count steps only after feature auto-disabling so progress reaches 100%
+        total_steps = self._count_steps()
 
         # ── Banner ──
         self.on_progress("=" * 60)
@@ -282,19 +299,35 @@ class TranscriptionPipeline:
                 segments = cache["segments"]
                 cached_model = cache.get("model")
                 cached_language = cache.get("language")
+                cached_detected = cache.get("detected_language")
                 cached_diarized = cache.get("diarized", False)
                 cached_diarize_params = cache.get("diarize_params", {})
+                cached_track = cache.get("audio_track", 0)
+                cached_confidence = cache.get("confidence_threshold")
 
                 current_diarize_params = {
                     "num_speakers": cfg.num_speakers,
                     "min_speakers": cfg.min_speakers,
                     "max_speakers": cfg.max_speakers,
+                    "diarization_model": cfg.diarization_model,
                 }
+                # Older caches predate the diarization_model key \u2014 treat as current
+                if "diarization_model" not in cached_diarize_params:
+                    cached_diarize_params["diarization_model"] = cfg.diarization_model
+
+                # Effective language the cache represents: the explicitly requested
+                # one, or what auto-detect found. Prevents a stale auto-detect cache
+                # from overriding an explicit --language on a re-run.
+                cache_lang = cached_language or cached_detected
 
                 if cached_model and cached_model != cfg.model:
                     self.on_progress(f"  Cache used model '{cached_model}', now using '{cfg.model}' \u2014 re-transcribing.")
-                elif cached_language and cfg.language and cached_language != cfg.language:
-                    self.on_progress(f"  Cache used language '{cached_language}', now using '{cfg.language}' \u2014 re-transcribing.")
+                elif cfg.language and cache_lang and cache_lang != cfg.language:
+                    self.on_progress(f"  Cache used language '{cache_lang}', now using '{cfg.language}' \u2014 re-transcribing.")
+                elif cached_track != cfg.audio_track:
+                    self.on_progress(f"  Cache used audio track {cached_track}, now using {cfg.audio_track} \u2014 re-transcribing.")
+                elif cached_confidence is not None and cached_confidence != cfg.confidence_threshold:
+                    self.on_progress("  Confidence threshold changed \u2014 re-transcribing.")
                 elif cfg.diarize and not cached_diarized:
                     self.on_progress("  Cache was not diarized, but diarization requested \u2014 re-transcribing.")
                 elif cfg.diarize and cached_diarized and cached_diarize_params != current_diarize_params:
@@ -310,66 +343,70 @@ class TranscriptionPipeline:
             # Pre-extract audio for non-default tracks
             transcribe_path = cfg.input_path
             _pre_extracted_wav = None
-            if cfg.audio_track != 0:
-                _pre_extracted_wav = extract_wav(
-                    cfg.input_path, track_index=cfg.audio_track,
-                    on_progress=self.on_progress,
-                )
-                transcribe_path = _pre_extracted_wav
-
-            segments, info = transcribe_audio(
-                transcribe_path, cfg.model, cfg.language,
-                on_progress=self.on_progress,
-            )
-            detected_lang = cfg.language or info.language
-
-            before_count = len(segments)
-            segments = clean_transcription(segments, language=detected_lang,
-                                           confidence_threshold=cfg.confidence_threshold)
-            removed = before_count - len(segments)
-            if removed > 0:
-                self.on_progress(f"Post-processing: removed {removed} hallucinated/non-speech segments")
-
-            self._check_cancel()
-
-            # Step 2: Diarize
-            if cfg.diarize:
-                current_step += 1
-                self.on_step(current_step, total_steps, "Diarizing")
-                self.on_progress("")
-                diarize_path = _pre_extracted_wav or cfg.input_path
-                speaker_segments = diarize_audio(
-                    diarize_path, hf_token,
-                    num_speakers=cfg.num_speakers,
-                    min_speakers=cfg.min_speakers,
-                    max_speakers=cfg.max_speakers,
-                    diarization_model=cfg.diarization_model,
-                    audio_track=cfg.audio_track,
-                    on_progress=self.on_progress,
-                )
-                segments = assign_speakers(segments, speaker_segments, cfg.speaker_names)
-
-            # Save cache
-            cache_data = {
-                "segments": segments,
-                "model": cfg.model,
-                "language": cfg.language,
-                "detected_language": detected_lang,
-                "diarized": cfg.diarize,
-                "diarize_params": {
-                    "num_speakers": cfg.num_speakers,
-                    "min_speakers": cfg.min_speakers,
-                    "max_speakers": cfg.max_speakers,
-                },
-            }
             try:
-                with open(cache_path, "w", encoding="utf-8") as f:
-                    json.dump(cache_data, f, ensure_ascii=False)
-                self.on_progress(f"Cached transcription to {cache_path}")
-            except OSError as e:
-                self.on_progress(f"Warning: Could not save cache: {e}")
+                if cfg.audio_track != 0:
+                    _pre_extracted_wav = extract_wav(
+                        cfg.input_path, track_index=cfg.audio_track,
+                        on_progress=self.on_progress,
+                    )
+                    transcribe_path = _pre_extracted_wav
+
+                segments, info = transcribe_audio(
+                    transcribe_path, cfg.model, cfg.language,
+                    on_progress=self.on_progress,
+                )
+                detected_lang = cfg.language or info.language
+
+                before_count = len(segments)
+                segments = clean_transcription(segments, language=detected_lang,
+                                               confidence_threshold=cfg.confidence_threshold)
+                removed = before_count - len(segments)
+                if removed > 0:
+                    self.on_progress(f"Post-processing: removed {removed} hallucinated/non-speech segments")
+
+                self._check_cancel()
+
+                # Step 2: Diarize
+                if cfg.diarize:
+                    current_step += 1
+                    self.on_step(current_step, total_steps, "Diarizing")
+                    self.on_progress("")
+                    diarize_path = _pre_extracted_wav or cfg.input_path
+                    speaker_segments = diarize_audio(
+                        diarize_path, hf_token,
+                        num_speakers=cfg.num_speakers,
+                        min_speakers=cfg.min_speakers,
+                        max_speakers=cfg.max_speakers,
+                        diarization_model=cfg.diarization_model,
+                        audio_track=cfg.audio_track,
+                        on_progress=self.on_progress,
+                    )
+                    segments = assign_speakers(segments, speaker_segments, cfg.speaker_names)
+
+                # Save cache
+                cache_data = {
+                    "segments": segments,
+                    "model": cfg.model,
+                    "language": cfg.language,
+                    "detected_language": detected_lang,
+                    "diarized": cfg.diarize,
+                    "audio_track": cfg.audio_track,
+                    "confidence_threshold": cfg.confidence_threshold,
+                    "diarize_params": {
+                        "num_speakers": cfg.num_speakers,
+                        "min_speakers": cfg.min_speakers,
+                        "max_speakers": cfg.max_speakers,
+                        "diarization_model": cfg.diarization_model,
+                    },
+                }
+                try:
+                    with open(cache_path, "w", encoding="utf-8") as f:
+                        json.dump(cache_data, f, ensure_ascii=False)
+                    self.on_progress(f"Cached transcription to {cache_path}")
+                except OSError as e:
+                    self.on_progress(f"Warning: Could not save cache: {e}")
             finally:
-                # Clean up pre-extracted WAV
+                # Clean up pre-extracted WAV on every exit path (error/cancel too)
                 if _pre_extracted_wav and os.path.exists(_pre_extracted_wav):
                     try:
                         os.remove(_pre_extracted_wav)
@@ -406,6 +443,7 @@ class TranscriptionPipeline:
                         keyframes, openrouter_key, cfg.vision_model,
                         cfg.vision_workers, api_base=cfg.api_base,
                         on_progress=self.on_progress,
+                        cancel_event=self._cancel,
                     )
 
             self._check_cancel()
@@ -560,12 +598,16 @@ class TranscriptionPipeline:
             if output_path:
                 self.on_progress(f"Auto-saving to: {output_path}")
 
-        # Write original output
+        # Write original output. A failed primary write (file locked, etc.)
+        # must not suppress the translated outputs below — they are separate
+        # files that may still be writable.
+        primary_written = False
         if output_path:
             try:
                 with open(output_path, "w", encoding="utf-8") as f:
                     f.write(output_text)
                 self.on_progress(f"Saved to: {output_path}")
+                primary_written = True
             except OSError as e:
                 self.on_progress(f"Error: Could not write output file: {e}")
 
@@ -589,7 +631,9 @@ class TranscriptionPipeline:
             summary=summary,
             metadata=metadata,
             output_text=output_text,
-            output_path=output_path,
+            # None when the write failed — consumers must not report a saved
+            # file that doesn't exist
+            output_path=output_path if primary_written else None,
             translated_outputs=translated_results,
             elapsed=total_elapsed,
         )

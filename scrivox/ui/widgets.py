@@ -240,12 +240,19 @@ class AutocompleteCombobox(ttk.Combobox):
         self["values"] = self._all_values
 
     def _on_escape(self, event=None):
+        had_popup = self._popup_active
         self._close_popup()
         if self._debounce_id is not None:
             self.after_cancel(self._debounce_id)
             self._debounce_id = None
         self["values"] = self._all_values
         self._multi_prefix = ""
+        # Consume the event only when Escape actually dismissed a popup — the
+        # app binds <Escape> globally to Cancel, and dismissing autocomplete
+        # must not cancel a running batch. With no popup open, let it through
+        # so Escape still works as Cancel while the combobox has focus.
+        if had_popup:
+            return "break"
 
     def _restore(self, event=None):
         """Restore full values (called externally or on Escape)."""

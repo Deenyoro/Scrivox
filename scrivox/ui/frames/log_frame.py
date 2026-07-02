@@ -9,6 +9,8 @@ from ..theme import COLORS, FONTS
 class LogFrame(ttk.LabelFrame):
     """Read-only scrolling text log with batched inserts for performance."""
 
+    MAX_LINES = 5000  # cap growth on long batch runs
+
     def __init__(self, parent, **kwargs):
         super().__init__(parent, text="LOG", **kwargs)
         self._buffer = []
@@ -67,9 +69,17 @@ class LogFrame(ttk.LabelFrame):
         combined = "".join(self._buffer)
         self._buffer.clear()
         try:
+            # Only auto-scroll when the user is already at (or near) the
+            # bottom — don't yank scrollback away during long batches
+            at_bottom = self.text_widget.yview()[1] >= 0.999
             self.text_widget.configure(state=tk.NORMAL)
             self.text_widget.insert(tk.END, combined)
-            self.text_widget.see(tk.END)
+            # Trim oldest lines past the cap
+            line_count = int(self.text_widget.index("end-1c").split(".")[0])
+            if line_count > self.MAX_LINES:
+                self.text_widget.delete("1.0", f"{line_count - self.MAX_LINES}.0")
+            if at_bottom:
+                self.text_widget.see(tk.END)
             self.text_widget.configure(state=tk.DISABLED)
         except tk.TclError:
             pass  # widget destroyed during shutdown

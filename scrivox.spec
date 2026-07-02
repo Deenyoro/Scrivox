@@ -126,7 +126,16 @@ a = Analysis(
     excludes=[
         'IPython', 'pytest',
         'tkinter.test',
-    ],
+    ] + ([
+        # Lite must actually exclude the diarization stack — features.py's
+        # `import pyannote.audio` probe is still discovered by Analysis, and
+        # a half-collected pyannote crashes at runtime instead of triggering
+        # the intended "not available in Lite" feature gate.
+        'pyannote', 'pyannote.audio', 'pyannote.core', 'pyannote.database',
+        'pyannote.pipeline', 'torchaudio', 'torchmetrics',
+        'pytorch_lightning', 'lightning_fabric', 'lightning',
+        'sklearn', 'asteroid_filterbanks', 'speechbrain',
+    ] if is_lite else []),
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,

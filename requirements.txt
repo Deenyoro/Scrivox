@@ -7,5 +7,5 @@ pynput>=1.8
 keyboard
 pyperclip
 python-dotenv>=1.0
-requests>=2.31
+requests>=2.32.4
 huggingface-hub>=0.28.1

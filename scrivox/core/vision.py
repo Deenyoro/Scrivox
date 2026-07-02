@@ -60,15 +60,22 @@ def extract_keyframes(video_path, interval_secs=60, max_frames=0, change_thresho
     on_progress(f"Extracting keyframes every {interval_secs}s from {duration:.0f}s video (fps={fps_expr})...")
 
     from .media import _subprocess_flags
-    subprocess.run(
-        ["ffmpeg", "-y", "-i", video_path,
-         "-vf", f"fps={fps_expr},scale=1280:-2",
-         "-q:v", "3",
-         os.path.join(tmpdir, "frame_%05d.jpg")],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True,
-        timeout=7200,
-        **_subprocess_flags(),
-    )
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", video_path,
+             "-vf", f"fps={fps_expr},scale=1280:-2",
+             "-q:v", "3",
+             os.path.join(tmpdir, "frame_%05d.jpg")],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True,
+            timeout=7200,
+            **_subprocess_flags(),
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        # Caller never receives tmpdir on failure — clean it up here or the
+        # partially-extracted frames leak in %TEMP%
+        import shutil
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        raise
 
     frames = sorted(glob.glob(os.path.join(tmpdir, "frame_*.jpg")))
     all_keyframes = []
@@ -121,10 +128,12 @@ def describe_keyframe(image_path, timestamp, api_key, vision_model, api_base=Non
                     "type": "text",
                     "text": (
                         f"This is a screenshot from a video at timestamp {ts_str}. "
-                        "Briefly describe what's visible on screen \u2014 any text, UI elements, "
-                        "people, slides, applications, or content shown. "
-                        "Be concise (2-3 sentences max). Focus on what would provide useful "
-                        "context alongside a transcript of the conversation."
+                        "Describe everything visible on screen in detail: the application or "
+                        "website shown, window titles, on-screen text (transcribe key headings, "
+                        "labels, names, and numbers verbatim), tables or data values, UI elements, "
+                        "people, slides, and any content being presented or edited. "
+                        "Write a thorough description that captures all context someone reading "
+                        "the meeting transcript would need to understand what was on screen."
                     ),
                 },
                 {
@@ -145,27 +154,36 @@ def describe_keyframe(image_path, timestamp, api_key, vision_model, api_base=Non
         model=vision_model,
         api_key=api_key,
         api_base=url,
-        max_tokens=200,
+        max_tokens=8000,
         max_retries=max_retries,
-        timeout=60,
+        # Detailed descriptions can take a while to stream at 8000 tokens
+        timeout=300,
     )
 
     return result or "[Vision error: no response]"
 
 
-def analyze_keyframes(keyframes, api_key, vision_model, max_workers=4, api_base=None, on_progress=print):
-    """Describe all keyframes using vision LLM with concurrent requests."""
+def analyze_keyframes(keyframes, api_key, vision_model, max_workers=4, api_base=None,
+                      on_progress=print, cancel_event=None):
+    """Describe all keyframes using vision LLM with concurrent requests.
+
+    Frames whose analysis failed are dropped (not embedded as error strings in
+    the transcript). Honors cancel_event between frames.
+    """
     on_progress(f"Analyzing {len(keyframes)} keyframes with vision LLM ({vision_model})...")
     t0 = time.time()
 
     descriptions = [None] * len(keyframes)
 
     def process_frame(idx, kf):
+        if cancel_event and cancel_event.is_set():
+            return idx, None
         ts_str = format_timestamp_human(kf["timestamp"])
         on_progress(f"  Frame {idx+1}/{len(keyframes)} @ {ts_str}...")
         desc = describe_keyframe(kf["path"], kf["timestamp"], api_key, vision_model, api_base=api_base, on_progress=on_progress)
         return idx, {"timestamp": kf["timestamp"], "description": desc}
 
+    failed = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(process_frame, i, kf): i for i, kf in enumerate(keyframes)}
         for future in concurrent.futures.as_completed(futures):
@@ -173,16 +191,28 @@ def analyze_keyframes(keyframes, api_key, vision_model, max_workers=4, api_base=
                 idx, result = future.result()
                 descriptions[idx] = result
             except Exception as e:
+                failed += 1
                 frame_idx = futures[future]
                 ts_str = format_timestamp_human(keyframes[frame_idx]["timestamp"])
                 on_progress(f"  Frame {frame_idx+1} @ {ts_str} failed: {e}")
-                descriptions[frame_idx] = {
-                    "timestamp": keyframes[frame_idx]["timestamp"],
-                    "description": f"[Frame analysis failed: {type(e).__name__}]",
-                }
 
-    descriptions = [d for d in descriptions if d is not None]
+    if cancel_event and cancel_event.is_set():
+        on_progress("Vision analysis cancelled.")
+
+    # Drop failed frames — an "[API error 429 ...]" string must never appear
+    # in the transcript as a screen description
+    from .llm_client import is_error_response
+    kept = []
+    for d in descriptions:
+        if d is None:
+            continue
+        if is_error_response(d["description"]):
+            failed += 1
+            continue
+        kept.append(d)
+    if failed:
+        on_progress(f"  Warning: {failed} frame(s) could not be described and were skipped")
 
     elapsed = time.time() - t0
-    on_progress(f"Vision analysis done in {elapsed:.1f}s")
-    return descriptions
+    on_progress(f"Vision analysis done in {elapsed:.1f}s ({len(kept)} descriptions)")
+    return kept

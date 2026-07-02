@@ -34,7 +34,13 @@ class TrackDialog(tk.Toplevel):
         self._center(parent)
 
         self.protocol("WM_DELETE_WINDOW", self._on_cancel)
-        self.bind("<Escape>", lambda e: self._on_cancel())
+        # "break" consumes the event so the app's global Escape-to-cancel
+        # binding doesn't also fire and kill a running batch
+        self.bind("<Escape>", self._on_escape)
+
+    def _on_escape(self, event=None):
+        self._on_cancel()
+        return "break"
 
     def _build(self, filename):
         # Header

@@ -266,7 +266,9 @@ def run_cli(argv=None):
     api_key = args.api_key or args.openrouter_key
     api_base = args.api_base
 
-    # --anthropic-key overrides: use Anthropic's Messages API
+    # --anthropic-key overrides: use Anthropic's Messages API.
+    # (The pipeline swaps any stock OpenRouter model defaults for the
+    # Anthropic default when the API base is Anthropic.)
     if args.anthropic_key:
         api_key = args.anthropic_key
         if not api_base:

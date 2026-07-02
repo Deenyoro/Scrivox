@@ -206,17 +206,50 @@ def _normalize_punctuation(text):
     return text.strip()
 
 
-def _capitalize_text(text):
-    """Capitalize sentence starts, the pronoun I, and common acronyms."""
+def _capitalize_text(text, language=None, capitalize_first=True):
+    """Capitalize sentence starts; for English also fix the pronoun I and acronyms.
+
+    The pronoun/acronym passes are English-specific: applying them to other
+    Latin-script languages corrupts common words (Italian "i"/"ai", etc.).
+    capitalize_first=False keeps the original casing of the first character
+    (for subtitle cues that continue mid-sentence).
+    """
     if not text:
         return text
-    text = text[0].upper() + text[1:]
+    if capitalize_first:
+        text = text[0].upper() + text[1:]
     text = re.sub(r'([.!?])\s+([a-z])', lambda m: m.group(1) + ' ' + m.group(2).upper(), text)
+    if (language or "en").lower().split("-")[0] != "en":
+        return text
     text = re.sub(r"\bi\b", "I", text)
     for acronym in ("ai", "hr", "api", "pto", "sso", "saas", "usa", "uk", "eu",
                      "ceo", "cto", "cfo", "coo", "vp", "qa", "kpi", "roi",
                      "pr", "ml", "sql", "url", "pdf", "faq", "gdpr", "eta", "asap", "rsvp"):
         text = re.sub(r'\b' + acronym + r'\b', acronym.upper(), text, flags=re.IGNORECASE)
+    return text
+
+
+def clean_segment_text(text, language=None, capitalize_first=True):
+    """Apply the per-segment text cleanup passes to a single text string.
+
+    Shared by clean_transcription and the subtitle splitter (which rebuilds
+    text from raw word timestamps and must not resurrect uncleaned text).
+    Returns the cleaned text, possibly empty.
+    """
+    text = _detect_repeated_phrase(text)
+    text = _detect_gapped_repeat(text)
+
+    # Only strip non-Latin characters for Latin-script languages
+    if _is_latin_language(language):
+        text = re.sub(r'[^\x00-\x7FÀ-ɏ‘’“”—–€£¥₩°±§©®™·•%]+', '', text)
+
+    text = _normalize_punctuation(text)
+
+    # Skip capitalization for scripts that have no concept of letter case
+    if _is_latin_language(language):
+        text = _capitalize_text(text, language=language,
+                                capitalize_first=capitalize_first)
+
     return text
 
 
@@ -237,18 +270,7 @@ def clean_transcription(segments, language=None, confidence_threshold=0.50):
         if _is_non_speech(text, language=seg_lang):
             continue
 
-        text = _detect_repeated_phrase(text)
-        text = _detect_gapped_repeat(text)
-
-        # Only strip non-Latin characters for Latin-script languages
-        if _is_latin_language(seg_lang):
-            text = re.sub(r'[^\x00-\x7F\u00C0-\u024F\u2018\u2019\u201C\u201D\u2014\u2013\u20AC\u00A3\u00A5\u20A9\u00B0\u00B1\u00A7\u00A9\u00AE\u2122\u00B7\u2022%]+', '', text)
-
-        text = _normalize_punctuation(text)
-
-        # Skip capitalization for scripts that have no concept of letter case
-        if _is_latin_language(seg_lang):
-            text = _capitalize_text(text)
+        text = clean_segment_text(text, language=seg_lang)
 
         if not text:
             continue

@@ -234,7 +234,11 @@ class ApiFrame(ttk.LabelFrame):
             if not results:
                 results.append("No keys to test")
 
-            return " | ".join(results), all("OK" in r for r in results if "not set" not in r)
+            # Success requires at least one key actually tested OK — an empty
+            # generator would make all() return True for "not set" results
+            tested = [r for r in results if "not set" not in r and "No keys" not in r]
+            all_ok = bool(tested) and all("OK" in r for r in tested)
+            return " | ".join(results), all_ok
 
         def _worker():
             # Always report back so the Test button never stays disabled

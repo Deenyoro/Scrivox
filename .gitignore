@@ -3,6 +3,14 @@
 
 # Claude Code
 CLAUDE.md
+.claude/
+
+# Personal batch scripts & private notes (not part of the app)
+ben_email.txt
+process_*.sh
+process_*.py
+run_mikemeeting.py
+logs/
 
 # Python
 __pycache__/
