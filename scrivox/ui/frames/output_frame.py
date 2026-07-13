@@ -35,7 +35,8 @@ class OutputFrame(ttk.LabelFrame):
         ttk.Label(row, text="Path:").pack(side=tk.LEFT)
         ttk.Entry(row, textvariable=self.output_path_var).pack(
             side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 4))
-        ttk.Button(row, text="...", command=self._browse_output, width=3).pack(side=tk.RIGHT)
+        ttk.Button(row, text="...", style="Secondary.TButton",
+                   command=self._browse_output, width=3).pack(side=tk.RIGHT)
 
         sub_cb = ttk.Checkbutton(self, text="Speaker labels in subtitles (SRT/VTT)",
                                   variable=self.subtitle_speakers_var)

@@ -107,6 +107,16 @@ def configure_theme(root):
               background=[("active", COLORS["accent_hover"]),
                           ("disabled", COLORS["border"])])
 
+    # Muted style for utility buttons (browse, copy, show/hide, ...) so the
+    # primary Start action stands out
+    style.configure("Secondary.TButton", background=COLORS["bg_input"],
+                     foreground=COLORS["fg"], font=FONTS["button"],
+                     padding=(12, 6), borderwidth=0)
+    style.map("Secondary.TButton",
+              background=[("active", COLORS["selection"]),
+                          ("disabled", COLORS["bg_secondary"])],
+              foreground=[("disabled", COLORS["border"])])
+
     style.configure("Cancel.TButton", background=COLORS["cancel_bg"],
                      foreground=COLORS["cancel_fg"], font=FONTS["button"],
                      padding=(16, 8))

@@ -33,16 +33,32 @@ def _extract_language_code(display_str):
 
 
 class ToolTip:
-    """Simple tooltip that appears on hover."""
+    """Simple tooltip that appears on hover, after a short delay."""
+
+    DELAY_MS = 500
 
     def __init__(self, widget, text):
         self._widget = widget
         self._text = text
         self._tipwindow = None
-        widget.bind("<Enter>", self._show)
+        self._after_id = None
+        widget.bind("<Enter>", self._schedule)
         widget.bind("<Leave>", self._hide)
 
+    def _schedule(self, event=None):
+        self._unschedule()
+        self._after_id = self._widget.after(self.DELAY_MS, self._show)
+
+    def _unschedule(self):
+        if self._after_id:
+            try:
+                self._widget.after_cancel(self._after_id)
+            except Exception:
+                pass
+            self._after_id = None
+
     def _show(self, event=None):
+        self._after_id = None
         if self._tipwindow:
             return
         x = self._widget.winfo_rootx() + 20
@@ -57,6 +73,7 @@ class ToolTip:
         label.pack()
 
     def _hide(self, event=None):
+        self._unschedule()
         if self._tipwindow:
             self._tipwindow.destroy()
             self._tipwindow = None

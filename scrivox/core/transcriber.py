@@ -310,11 +310,16 @@ def _get_whisper_cache_dir():
     return None
 
 
-def transcribe_audio(audio_path, model_name="large-v3", language=None, on_progress=print):
+def transcribe_audio(audio_path, model_name="large-v3", language=None, on_progress=print,
+                     on_fraction=None):
     """Transcribe audio using faster-whisper on CUDA.
 
     Whisper models are downloaded automatically on first use.
     Users can also place custom models in the 'models/whisper/' directory.
+
+    Args:
+        on_fraction: Optional callback receiving the within-step completion
+            fraction (0.0-1.0) as segments stream in.
     """
     from faster_whisper import WhisperModel
 
@@ -342,6 +347,12 @@ def transcribe_audio(audio_path, model_name="large-v3", language=None, on_progre
         word_timestamps=True,
     )
 
+    # Use the effective language for per-segment detection: the explicitly
+    # requested one, or whisper's auto-detected language. Passing the raw
+    # request (None on auto-detect) made Latin segments default to "en",
+    # mangling e.g. French text with English-only fixups.
+    primary = language or info.language
+
     result_segments = []
     for seg in segments:
         seg_text = seg.text.strip()
@@ -349,7 +360,7 @@ def transcribe_audio(audio_path, model_name="large-v3", language=None, on_progre
             "start": seg.start,
             "end": seg.end,
             "text": seg_text,
-            "language": _detect_segment_language(seg_text, language),
+            "language": _detect_segment_language(seg_text, primary),
             "words": [],
         }
         if seg.words:
@@ -361,6 +372,9 @@ def transcribe_audio(audio_path, model_name="large-v3", language=None, on_progre
                     "probability": w.probability,
                 })
         result_segments.append(entry)
+
+        if on_fraction and getattr(info, "duration", None):
+            on_fraction(min(seg.end / info.duration, 1.0))
 
     elapsed = time.time() - t0
     on_progress(f"Transcription done in {elapsed:.1f}s (language: {info.language}, prob: {info.language_probability:.2f})")

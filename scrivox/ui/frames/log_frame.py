@@ -19,7 +19,7 @@ class LogFrame(ttk.LabelFrame):
 
     def _build(self):
         container = ttk.Frame(self)
-        container.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        container.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
 
         self.text_widget = tk.Text(
             container,

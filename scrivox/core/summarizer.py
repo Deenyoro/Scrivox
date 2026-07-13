@@ -15,7 +15,8 @@ def _truncate_middle(text, max_chars, marker):
 
 
 def generate_meeting_summary(segments, api_key, summary_model, diarized=False,
-                             visual_context=None, api_base=None, on_progress=print):
+                             visual_context=None, api_base=None, on_progress=print,
+                             cancel_event=None):
     """Generate a meeting summary with key points, decisions, and action items."""
     on_progress(f"Generating meeting summary with {summary_model}...")
     t0 = time.time()
@@ -81,6 +82,7 @@ Be concise and factual. Only include information actually present in the transcr
         max_tokens=2000,
         max_retries=3,
         timeout=120,
+        cancel_event=cancel_event,
     )
 
     if is_error_response(result):

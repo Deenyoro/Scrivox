@@ -9,11 +9,25 @@ import sys
 
 # PyInstaller console=False builds set sys.stdout/stderr to None.
 # Libraries (pyannote, torch, etc.) crash when they try to print/write.
-# Redirect to devnull so nothing breaks.
-if sys.stdout is None:
+# Redirect to devnull so nothing breaks. Remember which streams were only
+# devnull placeholders so _attach_console knows they are safe to rebind.
+_STDOUT_WAS_NULL = sys.stdout is None
+_STDERR_WAS_NULL = sys.stderr is None
+if _STDOUT_WAS_NULL:
     sys.stdout = open(os.devnull, "w", encoding="utf-8", errors="replace")
-if sys.stderr is None:
+if _STDERR_WAS_NULL:
     sys.stderr = open(os.devnull, "w", encoding="utf-8", errors="replace")
+
+
+def _stream_invalid(stream):
+    """True if a stream is None or has no usable file descriptor."""
+    if stream is None:
+        return True
+    try:
+        stream.fileno()
+    except (AttributeError, OSError, ValueError):
+        return True
+    return False
 
 
 def _attach_console():
@@ -23,6 +37,10 @@ def _attach_console():
     If launched from a terminal (cmd/powershell), we attach to that console
     so CLI output is visible. If double-clicked, this silently fails and
     the GUI launches without a console window.
+
+    Only streams that were the devnull placeholder (or are invalid) get
+    rebound to CONOUT$ — rebinding unconditionally would clobber real
+    redirections like `Scrivox.exe file.mp4 > out.txt`.
     """
     if sys.platform == "win32":
         try:
@@ -33,8 +51,10 @@ def _attach_console():
                 # Reopen stdout/stderr to the attached console.
                 # closefd=False is illegal with a filename and would raise,
                 # leaving CLI output bound to devnull.
-                sys.stdout = open("CONOUT$", "w", encoding="utf-8", errors="replace")
-                sys.stderr = open("CONOUT$", "w", encoding="utf-8", errors="replace")
+                if _STDOUT_WAS_NULL or _stream_invalid(sys.stdout):
+                    sys.stdout = open("CONOUT$", "w", encoding="utf-8", errors="replace")
+                if _STDERR_WAS_NULL or _stream_invalid(sys.stderr):
+                    sys.stderr = open("CONOUT$", "w", encoding="utf-8", errors="replace")
         except Exception:
             pass
 

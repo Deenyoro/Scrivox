@@ -112,7 +112,8 @@ def extract_keyframes(video_path, interval_secs=60, max_frames=0, change_thresho
     return kept, tmpdir
 
 
-def describe_keyframe(image_path, timestamp, api_key, vision_model, api_base=None, max_retries=3, on_progress=print):
+def describe_keyframe(image_path, timestamp, api_key, vision_model, api_base=None, max_retries=3,
+                      on_progress=print, cancel_event=None):
     """Send a keyframe to vision LLM and get a description, with retries."""
     with open(image_path, "rb") as f:
         img_b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -158,6 +159,7 @@ def describe_keyframe(image_path, timestamp, api_key, vision_model, api_base=Non
         max_retries=max_retries,
         # Detailed descriptions can take a while to stream at 8000 tokens
         timeout=300,
+        cancel_event=cancel_event,
     )
 
     return result or "[Vision error: no response]"
@@ -180,13 +182,20 @@ def analyze_keyframes(keyframes, api_key, vision_model, max_workers=4, api_base=
             return idx, None
         ts_str = format_timestamp_human(kf["timestamp"])
         on_progress(f"  Frame {idx+1}/{len(keyframes)} @ {ts_str}...")
-        desc = describe_keyframe(kf["path"], kf["timestamp"], api_key, vision_model, api_base=api_base, on_progress=on_progress)
+        desc = describe_keyframe(kf["path"], kf["timestamp"], api_key, vision_model,
+                                 api_base=api_base, on_progress=on_progress,
+                                 cancel_event=cancel_event)
         return idx, {"timestamp": kf["timestamp"], "description": desc}
 
     failed = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(process_frame, i, kf): i for i, kf in enumerate(keyframes)}
         for future in concurrent.futures.as_completed(futures):
+            if cancel_event and cancel_event.is_set():
+                # Drop queued frames immediately — in-flight requests bail out
+                # via the cancel_event passed to chat_completion
+                executor.shutdown(wait=False, cancel_futures=True)
+                break
             try:
                 idx, result = future.result()
                 descriptions[idx] = result

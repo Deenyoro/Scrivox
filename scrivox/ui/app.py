@@ -4,8 +4,17 @@ import os
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 from tkinter import ttk, messagebox
+
+# Use the tkinterdnd2 root when available — drag-and-drop registration
+# (queue_frame) silently fails on a plain tk.Tk root
+try:
+    from tkinterdnd2 import TkinterDnD
+    _RootBase = TkinterDnD.Tk
+except ImportError:
+    _RootBase = tk.Tk
 
 from .. import __version__, __app_name__
 from ..config import ConfigManager
@@ -24,11 +33,27 @@ from .frames.log_frame import LogFrame
 from .frames.results_frame import ResultsFrame
 
 
-class ScrivoxApp(tk.Tk):
+class ScrivoxApp(_RootBase):
     """Main Scrivox application window."""
 
     def __init__(self):
+        # Opt in to per-monitor DPI scaling BEFORE the Tk window exists —
+        # otherwise Windows bitmap-stretches the whole UI into a blur on
+        # high-DPI displays
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                ctypes.windll.shcore.SetProcessDpiAwareness(1)
+            except Exception:
+                pass  # older Windows, or awareness already set by the host
+
         super().__init__()
+
+        # UI scale factor relative to standard 96 DPI
+        try:
+            self._ui_scale = self.winfo_fpixels("1i") / 96.0
+        except Exception:
+            self._ui_scale = 1.0
 
         self.config_manager = ConfigManager()
         self._variant = get_variant_name()
@@ -38,7 +63,7 @@ class ScrivoxApp(tk.Tk):
         if self._variant != "Regular":
             title += f" ({self._variant})"
         self.title(title)
-        self.minsize(900, 600)
+        self.minsize(int(900 * self._ui_scale), int(600 * self._ui_scale))
         self._set_geometry()
 
         # Theme
@@ -93,12 +118,14 @@ class ScrivoxApp(tk.Tk):
                 return
             except Exception:
                 pass
-        # Default: centered 1100x750
-        self.geometry("1100x750")
+        # Default: centered 1100x750 (scaled for DPI)
+        w = int(1100 * self._ui_scale)
+        h = int(750 * self._ui_scale)
+        self.geometry(f"{w}x{h}")
         self.update_idletasks()
-        x = (self.winfo_screenwidth() - 1100) // 2
-        y = (self.winfo_screenheight() - 750) // 2
-        self.geometry(f"1100x750+{x}+{y}")
+        x = (self.winfo_screenwidth() - w) // 2
+        y = (self.winfo_screenheight() - h) // 2
+        self.geometry(f"{w}x{h}+{x}+{y}")
 
     def _build_ui(self):
         # ── Title bar ──
@@ -116,9 +143,22 @@ class ScrivoxApp(tk.Tk):
         main_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
 
         # ── Left panel: Settings (fixed width, scrollable) ──
-        left_panel = ttk.Frame(main_frame, width=380)
+        left_panel = ttk.Frame(main_frame, width=int(380 * self._ui_scale))
         left_panel.pack(side=tk.LEFT, fill=tk.Y)
         left_panel.pack_propagate(False)
+
+        # ── Start / Cancel buttons — pinned above the scroll canvas so they
+        # never scroll out of view ──
+        btn_frame = ttk.Frame(left_panel)
+        btn_frame.pack(side=tk.TOP, fill=tk.X, padx=4, pady=(4, 6))
+
+        self._start_btn = ttk.Button(btn_frame, text="Start", style="Accent.TButton",
+                                      command=self._start_pipeline)
+        self._start_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
+
+        self._cancel_btn = ttk.Button(btn_frame, text="Cancel", style="Cancel.TButton",
+                                       command=self._cancel_pipeline, state=tk.DISABLED)
+        self._cancel_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         left_canvas = tk.Canvas(left_panel, bg=COLORS["bg"], highlightthickness=0,
                                  borderwidth=0)
@@ -168,18 +208,6 @@ class ScrivoxApp(tk.Tk):
 
         left_canvas.bind("<Enter>", _bind_mousewheel)
         left_canvas.bind("<Leave>", _unbind_mousewheel)
-
-        # ── Start / Cancel buttons (top of left panel) ──
-        btn_frame = ttk.Frame(self._left_inner)
-        btn_frame.pack(fill=tk.X, padx=4, pady=(4, 6))
-
-        self._start_btn = ttk.Button(btn_frame, text="Start", style="Accent.TButton",
-                                      command=self._start_pipeline)
-        self._start_btn.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
-
-        self._cancel_btn = ttk.Button(btn_frame, text="Cancel", style="Cancel.TButton",
-                                       command=self._cancel_pipeline, state=tk.DISABLED)
-        self._cancel_btn.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         # Queue frame
         self.queue_frame = QueueFrame(
@@ -240,7 +268,7 @@ class ScrivoxApp(tk.Tk):
         self.bind_all("<Control-o>",
                       lambda e: None if self._is_running else self.queue_frame.browse_files())
         self.bind_all("<Control-Return>", lambda e: self._start_pipeline())
-        self.bind_all("<Escape>", lambda e: self._cancel_pipeline())
+        self.bind_all("<Escape>", lambda e: self._cancel_pipeline(confirm=True))
         self.bind_all("<Control-l>", lambda e: self.log_frame.clear())
 
     def _run_preflight_checks(self):
@@ -277,17 +305,22 @@ class ScrivoxApp(tk.Tk):
                 parts.append("GPU: torch not available")
 
             # ffmpeg check
+            ffmpeg_missing = False
             try:
                 from ..core.media import _subprocess_flags
                 subprocess.run(["ffmpeg", "-version"],
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3,
                                **_subprocess_flags())
             except (FileNotFoundError, subprocess.TimeoutExpired):
-                parts.append("ffmpeg: NOT FOUND")
+                ffmpeg_missing = True
+                parts.append("ffmpeg NOT FOUND - install ffmpeg and add it to PATH "
+                             "(transcription cannot run without it)")
 
             parts.append(f"{__app_name__} v{__version__} ({self._variant})")
+            style = "Error.TLabel" if ffmpeg_missing else "Dim.TLabel"
             try:
-                self.after(0, lambda: self._status_bar.configure(text=" | ".join(parts)))
+                self.after(0, lambda: self._status_bar.configure(
+                    text=" | ".join(parts), style=style))
             except Exception:
                 pass  # window closed during startup checks
 
@@ -389,6 +422,54 @@ class ScrivoxApp(tk.Tk):
                                      "Pick a target language in the Translation section.")
                 return False
 
+        # ── Numeric range checks (mirror cli.py) — out-of-range values crash
+        # or silently corrupt the run (e.g. interval 0 divides by zero,
+        # confidence > 1 deletes every segment) ──
+        errors = []
+
+        if settings.vision_var.get():
+            vision_interval = settings._safe_float(settings.vision_interval_var.get(), 60.0)
+            vision_workers = settings._safe_int(settings.vision_workers_var.get(), 4)
+            vision_change = settings._safe_int(settings.vision_change_threshold_var.get(), 0)
+            if vision_interval <= 0:
+                errors.append("Vision interval must be greater than 0 seconds.")
+            if vision_workers < 1:
+                errors.append("Vision workers must be at least 1.")
+            if not 0 <= vision_change <= 64:
+                errors.append("Vision 'skip similar frames' threshold must be between 0 and 64.")
+
+        if settings.diarize_var.get():
+            num = settings.get_int_or_none(settings.num_speakers_var)
+            mins = settings.get_int_or_none(settings.min_speakers_var)
+            maxs = settings.get_int_or_none(settings.max_speakers_var)
+            for label, val in (("Exact speaker count", num),
+                               ("Min speakers", mins),
+                               ("Max speakers", maxs)):
+                if val is not None and val < 1:
+                    errors.append(f"{label} must be at least 1.")
+            if mins is not None and maxs is not None and mins > maxs:
+                errors.append("Min speakers cannot exceed max speakers.")
+
+        adv = self.models_frame.get_settings_dict() if self.models_frame else {}
+        sub_max_chars = adv.get("subtitle_max_chars", 84)
+        sub_min_chars = adv.get("subtitle_min_chars", 15)
+        if sub_max_chars <= 0:
+            errors.append("Subtitle max chars/cue must be greater than 0.")
+        if sub_min_chars < 0:
+            errors.append("Subtitle min chars/split cannot be negative.")
+        if sub_max_chars > 0 and sub_min_chars > sub_max_chars:
+            errors.append("Subtitle min chars/split cannot exceed max chars/cue.")
+        if adv.get("subtitle_max_duration", 4.0) <= 0:
+            errors.append("Subtitle max duration must be greater than 0 seconds.")
+        if adv.get("subtitle_max_gap", 0.8) < 0:
+            errors.append("Subtitle max gap cannot be negative.")
+        if not 0.0 <= adv.get("confidence_threshold", 0.50) <= 1.0:
+            errors.append("Confidence threshold must be between 0.0 and 1.0.")
+
+        if errors:
+            messagebox.showerror("Invalid settings", "\n".join(errors))
+            return False
+
         return True
 
     def _build_config(self, job=None):
@@ -449,6 +530,9 @@ class ScrivoxApp(tk.Tk):
         self._start_btn.configure(state=state)
         cancel_state = tk.NORMAL if running else tk.DISABLED
         self._cancel_btn.configure(state=cancel_state)
+        if not running:
+            # Restore the label after a "Cancelling..." run ends
+            self._cancel_btn.configure(text="Cancel")
         # Lock the queue while running — edits would desync job status rows
         self.queue_frame.set_enabled(not running)
 
@@ -463,6 +547,13 @@ class ScrivoxApp(tk.Tk):
         """Thread-safe step update callback."""
         try:
             self.after(0, self.progress_frame.update_step, step_num, total_steps, step_name)
+        except Exception:
+            pass
+
+    def _on_fraction(self, frac):
+        """Thread-safe within-step progress callback."""
+        try:
+            self.after(0, self.progress_frame.set_step_fraction, frac)
         except Exception:
             pass
 
@@ -544,6 +635,7 @@ class ScrivoxApp(tk.Tk):
                         on_progress=self._on_progress,
                         on_step=self._on_step,
                         cancel_event=self._cancel,
+                        on_fraction=self._on_fraction,
                     )
                     self._pipeline = pipeline
 
@@ -578,12 +670,21 @@ class ScrivoxApp(tk.Tk):
         self._pipeline_thread = threading.Thread(target=_run_batch, daemon=True)
         self._pipeline_thread.start()
 
-    def _cancel_pipeline(self):
-        """Request pipeline cancellation."""
+    def _cancel_pipeline(self, confirm=False):
+        """Request pipeline cancellation.
+
+        Args:
+            confirm: Ask before cancelling (used by the global Escape binding
+                so a stray keypress can't kill a long run).
+        """
         if not self._is_running:
             return  # Escape can fire while idle
+        if confirm and not messagebox.askyesno(
+                "Cancel", "Cancel the running transcription?"):
+            return
         self._cancel.set()
-        self._cancel_btn.configure(state=tk.DISABLED)
+        self._cancel_btn.configure(state=tk.DISABLED, text="Cancelling...")
+        self.progress_frame.set_cancelling()
         if self._pipeline:
             self._pipeline.cancel()
 
@@ -633,6 +734,20 @@ class ScrivoxApp(tk.Tk):
             self._cancel.set()
             if self._pipeline:
                 self._pipeline.cancel()
+            # Give the worker a few seconds to notice the cancel and clean up
+            # (temp WAVs, keyframe dirs, ffmpeg children) before tearing down
+            try:
+                self.progress_frame.set_cancelling()
+                self._cancel_btn.configure(state=tk.DISABLED, text="Cancelling...")
+            except Exception:
+                pass
+            deadline = time.time() + 3.0
+            while self._pipeline_thread.is_alive() and time.time() < deadline:
+                try:
+                    self.update()
+                except tk.TclError:
+                    break  # window already destroyed
+                time.sleep(0.05)
 
         self._save_current_settings()
         sys.stdout = self._original_stdout

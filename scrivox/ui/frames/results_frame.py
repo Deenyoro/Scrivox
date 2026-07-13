@@ -11,15 +11,19 @@ from ..theme import COLORS, FONTS
 class ResultsFrame(ttk.LabelFrame):
     """Results display with Copy, Save As, and Open Folder buttons."""
 
+    PLACEHOLDER = ("Transcript will appear here after a run - "
+                   "output is also saved next to the input file")
+
     def __init__(self, parent, **kwargs):
         super().__init__(parent, text="RESULTS", **kwargs)
         self._output_path = None
         self._full_text = ""
         self._build()
+        self._show_placeholder()
 
     def _build(self):
         container = ttk.Frame(self)
-        container.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+        container.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
 
         self.text_widget = tk.Text(
             container,
@@ -43,16 +47,28 @@ class ResultsFrame(ttk.LabelFrame):
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
+        # Dim style for the empty-state placeholder text
+        self.text_widget.tag_configure("placeholder", foreground=COLORS["fg_dim"])
+
         # Buttons
         btn_row = ttk.Frame(self)
-        btn_row.pack(fill=tk.X, padx=4, pady=(0, 4))
+        btn_row.pack(fill=tk.X, padx=8, pady=(0, 4))
 
-        self._copy_btn = ttk.Button(btn_row, text="Copy", command=self._copy)
+        self._copy_btn = ttk.Button(btn_row, text="Copy", style="Secondary.TButton",
+                                     command=self._copy)
         self._copy_btn.pack(side=tk.LEFT, padx=(0, 4))
-        ttk.Button(btn_row, text="Save As...", command=self._save_as).pack(side=tk.LEFT, padx=(0, 4))
-        self._open_btn = ttk.Button(btn_row, text="Open Folder", command=self._open_folder,
-                                     state=tk.DISABLED)
+        ttk.Button(btn_row, text="Save As...", style="Secondary.TButton",
+                   command=self._save_as).pack(side=tk.LEFT, padx=(0, 4))
+        self._open_btn = ttk.Button(btn_row, text="Open Folder", style="Secondary.TButton",
+                                     command=self._open_folder, state=tk.DISABLED)
         self._open_btn.pack(side=tk.LEFT)
+
+    def _show_placeholder(self):
+        """Show dim placeholder text in the empty results pane."""
+        self.text_widget.configure(state=tk.NORMAL)
+        self.text_widget.delete("1.0", tk.END)
+        self.text_widget.insert("1.0", self.PLACEHOLDER, "placeholder")
+        self.text_widget.configure(state=tk.DISABLED)
 
     def show_result(self, text, output_path=None):
         """Display result text and enable buttons."""
@@ -73,10 +89,8 @@ class ResultsFrame(ttk.LabelFrame):
             self._open_btn.configure(state=tk.DISABLED)
 
     def clear(self):
-        """Clear results."""
-        self.text_widget.configure(state=tk.NORMAL)
-        self.text_widget.delete("1.0", tk.END)
-        self.text_widget.configure(state=tk.DISABLED)
+        """Clear results (restores the empty-state placeholder)."""
+        self._show_placeholder()
         self._output_path = None
         self._full_text = ""
         self._open_btn.configure(state=tk.DISABLED)

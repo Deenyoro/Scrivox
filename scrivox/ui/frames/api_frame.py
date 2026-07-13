@@ -67,10 +67,8 @@ class ApiFrame(ttk.LabelFrame):
                                            textvariable=self.anthropic_key_var, show="*")
         self._anthropic_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 4))
 
-        # Anthropic hint
-        self._anthropic_hint = ttk.Label(
-            self, text="Get your key at console.anthropic.com/settings/keys",
-            style="Dim.TLabel")
+        # Per-provider key hint (text set in _on_provider_change)
+        self._key_hint = ttk.Label(self, text="", style="Dim.TLabel")
 
         # Custom base URL (hidden by default)
         self._custom_frame = ttk.Frame(self)
@@ -80,16 +78,31 @@ class ApiFrame(ttk.LabelFrame):
 
         # Buttons row
         btn_row = ttk.Frame(self)
-        btn_row.pack(fill=tk.X, padx=8, pady=(0, 8))
+        btn_row.pack(fill=tk.X, padx=8, pady=(0, 4))
 
-        self._show_btn = ttk.Button(btn_row, text="Show", command=self._toggle_show, width=6)
+        self._show_btn = ttk.Button(btn_row, text="Show", style="Secondary.TButton",
+                                     command=self._toggle_show, width=6)
         self._show_btn.pack(side=tk.LEFT, padx=(0, 4))
 
-        self._test_btn = ttk.Button(btn_row, text="Test Keys", command=self._test_keys)
+        self._test_btn = ttk.Button(btn_row, text="Test Keys", style="Secondary.TButton",
+                                     command=self._test_keys)
         self._test_btn.pack(side=tk.LEFT, padx=(0, 4))
 
-        self._status_label = ttk.Label(btn_row, text="", style="Dim.TLabel")
-        self._status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        # Test status on its own full-width row so long results wrap instead
+        # of being clipped next to the buttons
+        self._status_label = ttk.Label(self, text="", style="Dim.TLabel",
+                                        wraplength=330, justify=tk.LEFT)
+        self._status_label.pack(fill=tk.X, padx=8, pady=(0, 8), anchor=tk.W)
+
+        self._on_provider_change()
+
+    _KEY_HINTS = {
+        "OpenRouter": "Key required - openrouter.ai/keys",
+        "OpenAI": "Key required - platform.openai.com",
+        "Anthropic": "Anthropic key required - console.anthropic.com/settings/keys",
+        "Ollama (local)": "Local server - no API key needed",
+        "Custom": "Key required unless the base URL is local",
+    }
 
     def _on_provider_change(self, event=None):
         provider = self.provider_var.get()
@@ -99,12 +112,9 @@ class ApiFrame(ttk.LabelFrame):
             self._api_key_frame.pack_forget()
             self._anthropic_key_frame.pack(fill=tk.X, padx=8, pady=(0, 4),
                                             before=self._show_btn.master)
-            self._anthropic_hint.pack(padx=8, pady=(0, 4), anchor=tk.W,
-                                       before=self._show_btn.master)
             self._custom_frame.pack_forget()
         else:
             self._anthropic_key_frame.pack_forget()
-            self._anthropic_hint.pack_forget()
             self._api_key_frame.pack(fill=tk.X, padx=8, pady=(0, 4),
                                       before=self._show_btn.master)
             if provider == "Custom":
@@ -112,6 +122,13 @@ class ApiFrame(ttk.LabelFrame):
                                          before=self._show_btn.master)
             else:
                 self._custom_frame.pack_forget()
+
+        # Per-provider key hint, always just above the buttons
+        self._key_hint.configure(
+            text=self._KEY_HINTS.get(provider, "API key may be required"))
+        self._key_hint.pack_forget()
+        self._key_hint.pack(padx=8, pady=(0, 4), anchor=tk.W,
+                            before=self._show_btn.master)
 
     def _load_from_config(self):
         """Load keys from config, falling back to env vars."""

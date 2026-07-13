@@ -164,6 +164,7 @@ def translate_segments(segments, target_language, api_key, translation_model,
             temperature=0.3,
             max_retries=3,
             timeout=120,
+            cancel_event=cancel_event,
         )
 
         batch_translations = None
@@ -190,7 +191,8 @@ def translate_segments(segments, target_language, api_key, translation_model,
 
 
 def translate_text(text, target_language, api_key, translation_model,
-                   source_language=None, api_base=None, on_progress=print):
+                   source_language=None, api_base=None, on_progress=print,
+                   cancel_event=None):
     """Translate a block of text (e.g. meeting summary) preserving markdown structure.
 
     Returns translated text, or original text on failure.
@@ -222,6 +224,7 @@ def translate_text(text, target_language, api_key, translation_model,
         temperature=0.3,
         max_retries=3,
         timeout=120,
+        cancel_event=cancel_event,
     )
 
     if not is_error_response(result):
@@ -233,8 +236,8 @@ def translate_text(text, target_language, api_key, translation_model,
 
 def translate_strings(strings, target_language, api_key, translation_model,
                       source_language=None, api_base=None, batch_size=25,
-                      on_progress=print):
-    """Translate a list of short strings. Returns list of translated strings.
+                      on_progress=print, cancel_event=None):
+    """Translate a list of strings. Returns list of translated strings.
 
     Falls back to originals on failure.
     """
@@ -244,10 +247,24 @@ def translate_strings(strings, target_language, api_key, translation_model,
     from .constants import LLM_PROVIDERS, DEFAULT_LLM_PROVIDER
     url = api_base or LLM_PROVIDERS[DEFAULT_LLM_PROVIDER]
 
+    # Long strings (e.g. vision descriptions) blow past the response token
+    # budget at 25/batch and the whole batch falls back untranslated —
+    # shrink the batch so each request stays comfortably within limits
+    avg_len = sum(len(s) for s in strings) / len(strings)
+    if avg_len > 2000:
+        batch_size = min(batch_size, 3)
+    elif avg_len > 500:
+        batch_size = min(batch_size, 8)
+
     results = []
     total_batches = (len(strings) + batch_size - 1) // batch_size
 
     for batch_idx in range(total_batches):
+        if cancel_event and cancel_event.is_set():
+            on_progress("  String translation cancelled — keeping remaining originals")
+            results.extend(strings[len(results):])
+            break
+
         start = batch_idx * batch_size
         end = min(start + batch_size, len(strings))
         batch = strings[start:end]
@@ -266,16 +283,23 @@ def translate_strings(strings, target_language, api_key, translation_model,
             f"{numbered_text}"
         )
 
+        # Scale max_tokens to batch content like translate_segments does —
+        # a fixed budget truncates batches of long vision descriptions
+        # ~1 token per 4 chars, allow 3x expansion for verbose target languages
+        input_chars = sum(len(s) for s in batch)
+        max_tokens = min(max(4096, input_chars * 3 // 4), 16384)
+
         messages = [{"role": "user", "content": prompt}]
         result = chat_completion(
             messages=messages,
             model=translation_model,
             api_key=api_key,
             api_base=url,
-            max_tokens=4096,
+            max_tokens=max_tokens,
             temperature=0.3,
             max_retries=3,
-            timeout=60,
+            timeout=120,
+            cancel_event=cancel_event,
         )
 
         if not is_error_response(result):

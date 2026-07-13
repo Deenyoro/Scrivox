@@ -35,11 +35,14 @@ class QueueFrame(ttk.LabelFrame):
         btn_bar = ttk.Frame(self)
         btn_bar.pack(fill=tk.X, padx=8, pady=(8, 4))
 
-        self._add_btn = ttk.Button(btn_bar, text="Add Files...", command=self.browse_files)
+        self._add_btn = ttk.Button(btn_bar, text="Add Files...", style="Secondary.TButton",
+                                    command=self.browse_files)
         self._add_btn.pack(side=tk.LEFT, padx=(0, 4))
-        self._remove_btn = ttk.Button(btn_bar, text="Remove", command=self._remove_selected)
+        self._remove_btn = ttk.Button(btn_bar, text="Remove", style="Secondary.TButton",
+                                       command=self._remove_selected)
         self._remove_btn.pack(side=tk.LEFT, padx=(0, 4))
-        self._clear_btn = ttk.Button(btn_bar, text="Clear All", command=self._clear_all)
+        self._clear_btn = ttk.Button(btn_bar, text="Clear All", style="Secondary.TButton",
+                                      command=self._clear_all)
         self._clear_btn.pack(side=tk.LEFT)
         self._enabled = True
 
@@ -47,18 +50,24 @@ class QueueFrame(ttk.LabelFrame):
         tree_frame = ttk.Frame(self)
         tree_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 4))
 
-        columns = ("file", "track", "lang", "status")
+        columns = ("file", "track", "status")
         self._tree = ttk.Treeview(tree_frame, columns=columns, show="headings",
                                    height=5, selectmode="extended")
         self._tree.heading("file", text="File")
         self._tree.heading("track", text="Track")
-        self._tree.heading("lang", text="Lang")
         self._tree.heading("status", text="Status")
 
-        self._tree.column("file", width=160, minwidth=100, stretch=True)
+        self._tree.column("file", width=180, minwidth=100, stretch=True)
         self._tree.column("track", width=80, minwidth=50, stretch=False)
-        self._tree.column("lang", width=40, minwidth=35, stretch=False)
-        self._tree.column("status", width=60, minwidth=50, stretch=False)
+        self._tree.column("status", width=70, minwidth=50, stretch=False)
+
+        # Color rows by status
+        self._tree.tag_configure("running", foreground=COLORS["accent"])
+        self._tree.tag_configure("done", foreground=COLORS["success"])
+        self._tree.tag_configure("error", foreground=COLORS["error"])
+        self._tree.tag_configure("cancelled", foreground=COLORS["fg_dim"])
+
+        self._tree.bind("<Delete>", lambda e: self._remove_selected())
 
         scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self._tree.yview)
         self._tree.configure(yscrollcommand=scrollbar.set)
@@ -82,20 +91,26 @@ class QueueFrame(ttk.LabelFrame):
                   foreground=[("selected", COLORS["fg_bright"])])
 
         # ── Drop zone hint ──
-        self._hint_label = ttk.Label(self, text="Drag files here or click \"Add Files...\"",
-                                      style="Dim.TLabel")
+        self._hint_label = ttk.Label(self, text="", style="Dim.TLabel")
         self._hint_label.pack(padx=8, pady=(0, 6))
 
-        # Try to enable drag-and-drop
+        # Try to enable drag-and-drop, then set the hint accordingly
         self._setup_dnd()
+        self._update_hint()
 
     def _setup_dnd(self):
-        """Try to set up tkinterdnd2 drag-and-drop. Silently fails if not available."""
+        """Try to set up tkinterdnd2 drag-and-drop. Silently fails if not available.
+
+        Requires the app root to be a TkinterDnD.Tk (see ui/app.py) —
+        drop_target_register raises on a plain tk.Tk root.
+        """
+        self._dnd_available = False
         try:
             from tkinterdnd2 import DND_FILES
             self._tree.drop_target_register(DND_FILES)
             self._tree.dnd_bind("<<Drop>>", self._on_drop)
-        except (ImportError, Exception):
+            self._dnd_available = True
+        except Exception:
             pass  # tkinterdnd2 not available — browse-only mode
 
     def _on_drop(self, event):
@@ -207,11 +222,12 @@ class QueueFrame(ttk.LabelFrame):
         """Insert a job row into the treeview."""
         filename = os.path.basename(job.file_path)
         track = job.track_label or "\u2014"
-        lang = job.language_override or "auto"
-        self._tree.insert("", tk.END, values=(filename, track, lang, "Pending"))
+        self._tree.insert("", tk.END, values=(filename, track, "Pending"))
 
     def _remove_selected(self):
         """Remove selected jobs from the queue."""
+        if not self._enabled:
+            return  # queue is locked while a batch is running
         selected = self._tree.selection()
         # Get indices (items are in order)
         all_items = self._tree.get_children()
@@ -233,15 +249,17 @@ class QueueFrame(ttk.LabelFrame):
         """Show/hide the drop zone hint."""
         if self._jobs:
             self._hint_label.configure(text=f"{len(self._jobs)} job(s) queued")
-        else:
+        elif self._dnd_available:
             self._hint_label.configure(text="Drag files here or click \"Add Files...\"")
+        else:
+            self._hint_label.configure(text="Click \"Add Files...\" to choose media")
 
     def get_jobs(self) -> List[JobConfig]:
         """Return the current job list."""
         return list(self._jobs)
 
     def set_job_status(self, index, status):
-        """Update the status column for a job."""
+        """Update the status column (and row color tag) for a job."""
         items = self._tree.get_children()
         if index < len(items):
             item = items[index]
@@ -253,8 +271,9 @@ class QueueFrame(ttk.LabelFrame):
                 "error": "Error",
                 "cancelled": "Cancelled",
             }
-            values[3] = status_map.get(status, status)
-            self._tree.item(item, values=values)
+            values[2] = status_map.get(status, status)
+            tags = (status,) if status in ("running", "done", "error", "cancelled") else ()
+            self._tree.item(item, values=values, tags=tags)
 
     @property
     def file_path(self):

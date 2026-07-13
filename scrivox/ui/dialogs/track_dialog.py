@@ -37,6 +37,9 @@ class TrackDialog(tk.Toplevel):
         # "break" consumes the event so the app's global Escape-to-cancel
         # binding doesn't also fire and kill a running batch
         self.bind("<Escape>", self._on_escape)
+        self.bind("<Return>", lambda e: self._on_ok())
+        # Focus OK so Enter/Space confirm immediately
+        self.after(10, self._ok_btn.focus_set)
 
     def _on_escape(self, event=None):
         self._on_cancel()
@@ -73,13 +76,16 @@ class TrackDialog(tk.Toplevel):
         self._lang_entry.insert(0, "en")
         self._lang_entry.configure(state=tk.DISABLED)
         self._lang_entry.pack(side=tk.LEFT, padx=(8, 0))
+        # Apply the language filter live as the user types
+        self._lang_entry.bind("<KeyRelease>", self._on_lang_typed)
 
         # Buttons
         btn_frame = ttk.Frame(self)
         btn_frame.pack(fill=tk.X, padx=16, pady=(0, 12))
 
-        ttk.Button(btn_frame, text="Add Selected", style="Accent.TButton",
-                   command=self._on_ok).pack(side=tk.RIGHT, padx=(8, 0))
+        self._ok_btn = ttk.Button(btn_frame, text="Add Selected", style="Accent.TButton",
+                                   command=self._on_ok)
+        self._ok_btn.pack(side=tk.RIGHT, padx=(8, 0))
         ttk.Button(btn_frame, text="Cancel",
                    command=self._on_cancel).pack(side=tk.RIGHT)
 
@@ -109,6 +115,10 @@ class TrackDialog(tk.Toplevel):
             self._apply_lang_filter()
         else:
             self._lang_entry.configure(state=tk.DISABLED)
+
+    def _on_lang_typed(self, event=None):
+        if self._auto_lang_var.get():
+            self._apply_lang_filter()
 
     def _apply_lang_filter(self):
         """Select tracks matching the language filter."""

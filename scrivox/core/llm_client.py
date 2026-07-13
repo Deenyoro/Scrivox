@@ -15,6 +15,7 @@ ANTHROPIC_API_VERSION = "2023-06-01"
 _ERROR_PREFIXES = (
     "[API error",
     "[Vision error",
+    "[Cancelled",
 )
 
 
@@ -170,6 +171,7 @@ def chat_completion(
     temperature: Optional[float] = None,
     max_retries: int = 3,
     timeout: int = 120,
+    cancel_event=None,
 ) -> Optional[str]:
     """Send a chat completion request, auto-detecting API format.
 
@@ -182,6 +184,8 @@ def chat_completion(
         temperature: Sampling temperature (None = API default).
         max_retries: Number of retry attempts on transient errors.
         timeout: Request timeout in seconds.
+        cancel_event: Optional threading.Event — checked before each attempt
+            and during backoff sleeps; returns a "[Cancelled]" sentinel when set.
 
     Returns:
         Response text string, or None on complete failure.
@@ -192,23 +196,44 @@ def chat_completion(
     if use_anthropic:
         return _anthropic_completion(
             messages, model, api_key, api_base,
-            max_tokens, temperature, max_retries, timeout,
+            max_tokens, temperature, max_retries, timeout, cancel_event,
         )
     else:
         return _openai_completion(
             messages, model, api_key, api_base,
-            max_tokens, temperature, max_retries, timeout,
+            max_tokens, temperature, max_retries, timeout, cancel_event,
         )
 
 
-def _post_with_retry(api_base, headers, payload, parse_fn, max_retries, timeout):
+def _cancellable_sleep(delay, cancel_event):
+    """Sleep for delay seconds in <=1s increments, aborting if cancelled.
+
+    Returns True if the sleep was interrupted by cancellation.
+    """
+    if cancel_event is None:
+        time.sleep(delay)
+        return False
+    remaining = delay
+    while remaining > 0:
+        if cancel_event.is_set():
+            return True
+        time.sleep(min(1.0, remaining))
+        remaining -= 1.0
+    return cancel_event.is_set()
+
+
+def _post_with_retry(api_base, headers, payload, parse_fn, max_retries, timeout,
+                     cancel_event=None):
     """Shared request/retry driver for both API formats.
 
     Retries on 429/5xx (honoring Retry-After), transient network errors, and
     200s whose content parses to nothing. Returns the parsed text or an
-    "[API error ...]" sentinel (see is_error_response).
+    "[API error ...]" sentinel (see is_error_response). Honors cancel_event
+    before each attempt and during backoff sleeps, returning "[Cancelled]".
     """
     for attempt in range(max_retries):
+        if cancel_event is not None and cancel_event.is_set():
+            return "[Cancelled]"
         try:
             resp = requests.post(
                 api_base, headers=headers, json=payload, timeout=timeout,
@@ -219,13 +244,15 @@ def _post_with_retry(api_base, headers, payload, parse_fn, max_retries, timeout)
                     # Empty/unparseable content (reasoning consumed max_tokens,
                     # or a 200-with-error body) — retry
                     if attempt < max_retries - 1:
-                        time.sleep(_retry_delay(None, attempt))
+                        if _cancellable_sleep(_retry_delay(None, attempt), cancel_event):
+                            return "[Cancelled]"
                         continue
                     return f"[API error: empty response after {max_retries} retries]"
                 return text
             elif resp.status_code >= 500 or resp.status_code == 429:
                 if attempt < max_retries - 1:
-                    time.sleep(_retry_delay(resp, attempt))
+                    if _cancellable_sleep(_retry_delay(resp, attempt), cancel_event):
+                        return "[Cancelled]"
                     continue
                 return f"[API error {resp.status_code} after {max_retries} retries]"
             else:
@@ -240,7 +267,8 @@ def _post_with_retry(api_base, headers, payload, parse_fn, max_retries, timeout)
                 requests.exceptions.SSLError,
                 requests.exceptions.ChunkedEncodingError) as e:
             if attempt < max_retries - 1:
-                time.sleep(_retry_delay(None, attempt))
+                if _cancellable_sleep(_retry_delay(None, attempt), cancel_event):
+                    return "[Cancelled]"
             else:
                 return f"[API error: {type(e).__name__} after {max_retries} retries]"
 
@@ -248,7 +276,7 @@ def _post_with_retry(api_base, headers, payload, parse_fn, max_retries, timeout)
 
 
 def _anthropic_completion(messages, model, api_key, api_base, max_tokens,
-                          temperature, max_retries, timeout):
+                          temperature, max_retries, timeout, cancel_event=None):
     """Make an Anthropic Messages API call."""
     converted_messages, system_text = _convert_openai_to_anthropic_messages(messages)
 
@@ -269,17 +297,24 @@ def _anthropic_completion(messages, model, api_key, api_base, max_tokens,
     }
 
     return _post_with_retry(api_base, headers, payload,
-                            _parse_anthropic_response, max_retries, timeout)
+                            _parse_anthropic_response, max_retries, timeout,
+                            cancel_event=cancel_event)
 
 
 def _openai_completion(messages, model, api_key, api_base, max_tokens,
-                       temperature, max_retries, timeout):
+                       temperature, max_retries, timeout, cancel_event=None):
     """Make an OpenAI-compatible chat completion call."""
     payload = {
         "model": model,
         "messages": messages,
-        "max_tokens": max_tokens,
     }
+    # api.openai.com rejects max_tokens for current models — it was replaced
+    # by max_completion_tokens. Other OpenAI-compatible backends (OpenRouter,
+    # Ollama, vLLM, ...) still expect max_tokens.
+    if "api.openai.com" in (api_base or ""):
+        payload["max_completion_tokens"] = max_tokens
+    else:
+        payload["max_tokens"] = max_tokens
     if temperature is not None:
         payload["temperature"] = temperature
 
@@ -288,4 +323,5 @@ def _openai_completion(messages, model, api_key, api_base, max_tokens,
         headers["Authorization"] = f"Bearer {api_key}"
 
     return _post_with_retry(api_base, headers, payload,
-                            _parse_openai_response, max_retries, timeout)
+                            _parse_openai_response, max_retries, timeout,
+                            cancel_event=cancel_event)

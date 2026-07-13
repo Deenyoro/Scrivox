@@ -143,7 +143,8 @@ class TranscriptionPipeline:
 
     def __init__(self, config: PipelineConfig, on_progress: Callable = print,
                  on_step: Optional[Callable] = None,
-                 cancel_event: Optional[threading.Event] = None):
+                 cancel_event: Optional[threading.Event] = None,
+                 on_fraction: Optional[Callable] = None):
         """
         Args:
             config: Pipeline configuration
@@ -151,10 +152,13 @@ class TranscriptionPipeline:
             on_step: Callback for step changes: on_step(step_num, total_steps, step_name)
             cancel_event: Optional shared Event — lets a GUI cancel a batch
                 without racing against which pipeline object is current
+            on_fraction: Callback for within-step progress: on_fraction(frac)
+                with frac in 0.0-1.0 (currently reported during transcription)
         """
         self.config = config
         self.on_progress = on_progress
         self.on_step = on_step or (lambda *a: None)
+        self.on_fraction = on_fraction
         self._cancel = cancel_event if cancel_event is not None else threading.Event()
 
     def cancel(self):
@@ -298,6 +302,8 @@ class TranscriptionPipeline:
                     cache = json.load(f)
                 segments = cache["segments"]
                 cached_model = cache.get("model")
+                cached_size = cache.get("input_size")
+                cached_mtime = cache.get("input_mtime")
                 cached_language = cache.get("language")
                 cached_detected = cache.get("detected_language")
                 cached_diarized = cache.get("diarized", False)
@@ -320,7 +326,15 @@ class TranscriptionPipeline:
                 # from overriding an explicit --language on a re-run.
                 cache_lang = cached_language or cached_detected
 
-                if cached_model and cached_model != cfg.model:
+                # The cache keys on the input path — if the media file was
+                # replaced, size/mtime differ and the transcript is stale.
+                # Old caches lack these keys: treat that as a mismatch too.
+                current_size = os.path.getsize(cfg.input_path)
+                current_mtime = os.path.getmtime(cfg.input_path)
+
+                if cached_size != current_size or cached_mtime != current_mtime:
+                    self.on_progress("  Media file changed since cache was written — re-transcribing.")
+                elif cached_model and cached_model != cfg.model:
                     self.on_progress(f"  Cache used model '{cached_model}', now using '{cfg.model}' \u2014 re-transcribing.")
                 elif cfg.language and cache_lang and cache_lang != cfg.language:
                     self.on_progress(f"  Cache used language '{cache_lang}', now using '{cfg.language}' \u2014 re-transcribing.")
@@ -336,7 +350,7 @@ class TranscriptionPipeline:
                     self.on_progress(f"Loaded {len(segments)} segments from cache")
                     detected_lang = cache.get("detected_language", cfg.language)
                     cache_hit = True
-            except (json.JSONDecodeError, KeyError) as e:
+            except (json.JSONDecodeError, KeyError, TypeError) as e:
                 self.on_progress(f"Warning: Cache file corrupt ({e}), re-transcribing.")
 
         if not cache_hit:
@@ -354,6 +368,7 @@ class TranscriptionPipeline:
                 segments, info = transcribe_audio(
                     transcribe_path, cfg.model, cfg.language,
                     on_progress=self.on_progress,
+                    on_fraction=self.on_fraction,
                 )
                 detected_lang = cfg.language or info.language
 
@@ -384,8 +399,15 @@ class TranscriptionPipeline:
                     segments = assign_speakers(segments, speaker_segments, cfg.speaker_names)
 
                 # Save cache
+                try:
+                    _input_size = os.path.getsize(cfg.input_path)
+                    _input_mtime = os.path.getmtime(cfg.input_path)
+                except OSError:
+                    _input_size = _input_mtime = None
                 cache_data = {
                     "segments": segments,
+                    "input_size": _input_size,
+                    "input_mtime": _input_mtime,
                     "model": cfg.model,
                     "language": cfg.language,
                     "detected_language": detected_lang,
@@ -459,6 +481,7 @@ class TranscriptionPipeline:
                     diarized=cfg.diarize, visual_context=visual_context,
                     api_base=cfg.api_base,
                     on_progress=self.on_progress,
+                    cancel_event=self._cancel,
                 )
         finally:
             if tmpdir:
@@ -484,10 +507,9 @@ class TranscriptionPipeline:
                     source_language=source_name,
                     api_base=cfg.api_base,
                     on_progress=self.on_progress,
+                    cancel_event=self._cancel,
                 )
-                lang_segments = translate_segments(
-                    segments, cancel_event=self._cancel, **_tr_kwargs,
-                )
+                lang_segments = translate_segments(segments, **_tr_kwargs)
 
                 lang_summary = None
                 lang_visual_context = None
