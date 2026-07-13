@@ -27,6 +27,9 @@ def build_parser():
     parser = argparse.ArgumentParser(
         description="Scrivox - GPU Transcription + Diarization + Vision + Summary",
         formatter_class=argparse.RawDescriptionHelpFormatter,
+        # Abbreviated flags (--diar) would desync the raw-argv checks that
+        # --use-config uses to tell explicit flags from saved settings.
+        allow_abbrev=False,
         epilog="""Examples:
   python main.py meeting.mp3
   python main.py meeting.mp4 --diarize
@@ -62,6 +65,16 @@ def build_parser():
                                help="Comma-separated speaker names, e.g. 'Alice,Bob,Charlie'")
     diarize_group.add_argument("--diarization-model", default=DEFAULT_DIARIZATION_MODEL,
                                help=f"Diarization model ID or local path (default: {DEFAULT_DIARIZATION_MODEL})")
+
+    # Feature negations: turn OFF a feature that --use-config or --all enabled.
+    parser.add_argument("--no-diarize", action="store_true",
+                        help="Disable diarization even if enabled by --use-config/--all")
+    parser.add_argument("--no-vision", action="store_true",
+                        help="Disable vision even if enabled by --use-config/--all")
+    parser.add_argument("--no-summarize", action="store_true",
+                        help="Disable summary even if enabled by --use-config/--all")
+    parser.add_argument("--no-translate", action="store_true",
+                        help="Disable translation even if enabled by --use-config")
 
     # Vision options
     vision_group = parser.add_argument_group("Vision Analysis")
@@ -123,6 +136,11 @@ def build_parser():
                               help="Min avg word probability to keep a segment (default: 0.50)")
 
     # Cache / credential options
+    parser.add_argument("--use-config", action="store_true",
+                        help="Apply the settings saved by the Scrivox GUI "
+                             "(scrivox_config.json) as defaults for this run; "
+                             "any flag given explicitly still wins. Lets other "
+                             "apps run Scrivox with your saved preferences.")
     parser.add_argument("--clear-cache", action="store_true",
                         help="Force re-transcription, ignoring cached results")
     parser.add_argument("--hf-token", default=None,
@@ -143,10 +161,163 @@ def build_parser():
     return parser
 
 
+def _flag_given(argv, flag):
+    """True when `flag` was passed explicitly (either '--flag val' or '--flag=val')."""
+    return any(a == flag or a.startswith(flag + "=") for a in argv)
+
+
+def _lang_code(display):
+    """'Arabic (ar)' -> 'ar'; raw codes pass through. The GUI saves the
+    combobox DISPLAY string, so config values must be reduced to codes before
+    they can be used as CLI values (mirrors the GUI's _extract_language_code)."""
+    display = (display or "").strip()
+    if not display:
+        return ""
+    if "(" in display and display.endswith(")"):
+        return display.rsplit("(", 1)[1].rstrip(")").strip()
+    return display
+
+
+# Saved numbers only become defaults when they would survive run_cli's own
+# validation; anything out of range falls back to the built-in default rather
+# than killing the run (the GUI lets some invalid values be saved).
+_NUMERIC_RANGES = {
+    "vision_interval": lambda v: v > 0,
+    "vision_workers": lambda v: v >= 1,
+    "vision_change_threshold": lambda v: 0 <= v <= 64,
+    "subtitle_max_chars": lambda v: v > 0,
+    "subtitle_max_duration": lambda v: v > 0,
+    "subtitle_max_gap": lambda v: v >= 0,
+    "subtitle_min_chars": lambda v: v >= 0,
+    "confidence_threshold": lambda v: 0.0 <= v <= 1.0,
+}
+
+
+def _defaults_from_config():
+    """Map the GUI's saved settings (scrivox_config.json) to parser defaults.
+
+    Used by --use-config so external callers (or the user's own scripts) can run
+    the CLI with whatever was last configured in the Scrivox GUI. Only values
+    that are actually set in the config (and would pass validation) are
+    returned; everything else keeps the parser's built-in default, and
+    explicitly passed flags always override. Credentials/provider are applied
+    separately after parsing so explicit key flags keep their precedence.
+    """
+    from .config import ConfigManager
+
+    cfg = ConfigManager()
+    ls = cfg.get_last_settings()
+    d = {}
+
+    for key in ("model", "speaker_names", "vision_model", "summary_model",
+                "diarization_model", "translation_model"):
+        val = ls.get(key)
+        if isinstance(val, str) and val.strip():
+            d[key] = val.strip()
+    lang = _lang_code(ls.get("language") if isinstance(ls.get("language"), str)
+                      else "")
+    if lang:
+        d["language"] = lang
+    for key in ("diarize", "vision", "summarize", "translate_all",
+                "subtitle_speakers"):
+        val = ls.get(key)
+        if isinstance(val, bool):
+            d[key] = val
+    for key in ("num_speakers", "min_speakers", "max_speakers"):
+        val = ls.get(key)
+        if isinstance(val, int) and not isinstance(val, bool) and val >= 1:
+            d[key] = val
+    if d.get("min_speakers") and d.get("max_speakers") \
+            and d["min_speakers"] > d["max_speakers"]:
+        d.pop("min_speakers")
+        d.pop("max_speakers")
+    for key, ok in _NUMERIC_RANGES.items():
+        val = ls.get(key)
+        if isinstance(val, (int, float)) and not isinstance(val, bool) \
+                and ok(val):
+            d[key] = val
+    if d.get("subtitle_min_chars", 15) > d.get("subtitle_max_chars", 84):
+        d.pop("subtitle_min_chars", None)
+    fmt = ls.get("output_format")
+    if fmt in OUTPUT_FORMATS:
+        d["format"] = fmt
+    if ls.get("translate") and isinstance(ls.get("translate_to"), str):
+        codes = ",".join(c for c in (_lang_code(p) for p in
+                                     ls["translate_to"].split(",")) if c)
+        if codes:
+            d["translate_to"] = codes
+    return d
+
+
+def _apply_config_credentials(args):
+    """Apply saved credentials/provider where no explicit flag was given.
+
+    Done after parsing (not via set_defaults) so precedence is exact: any
+    explicit credential flag disables ALL saved keys, and an explicit
+    --anthropic-key keeps its implied Anthropic API base instead of being
+    steered to the saved provider's endpoint.
+    """
+    from .config import ConfigManager
+    from .core.constants import LLM_PROVIDERS
+
+    cfg = ConfigManager()
+    hf_token, openrouter_key, anthropic_key = cfg.get_credentials()
+    provider = cfg.get("api", "provider", "") or ""
+    custom_base = (cfg.get("api", "custom_base", "") or "").strip()
+
+    if hf_token and not args.hf_token:
+        args.hf_token = hf_token
+    if not (args.api_key or args.openrouter_key or args.anthropic_key):
+        if provider == "Anthropic" and anthropic_key:
+            args.anthropic_key = anthropic_key
+        elif openrouter_key:
+            args.api_key = openrouter_key
+    if not args.api_base and not args.anthropic_key:
+        # An Anthropic key (explicit or saved) implies its own base later;
+        # OpenRouter is the built-in default, so neither needs steering here.
+        if provider == "Custom" and custom_base:
+            args.api_base = custom_base
+        elif provider in LLM_PROVIDERS \
+                and provider not in ("OpenRouter", "Anthropic"):
+            args.api_base = LLM_PROVIDERS[provider]
+
+
 def run_cli(argv=None):
     """Parse CLI args and run the pipeline."""
     parser = build_parser()
+    if argv is None:
+        argv = sys.argv[1:]
+    if _flag_given(argv, "--use-config"):
+        try:
+            parser.set_defaults(**_defaults_from_config())
+        except Exception as e:  # a broken config file must not kill the run
+            print(f"Warning: could not apply saved settings: {e}",
+                  file=sys.stderr)
     args = parser.parse_args(argv)
+
+    # Settings pulled from the GUI config are preferences, not demands: when
+    # this build can't do one of them, drop it quietly (with a notice) instead
+    # of erroring out the way an explicitly passed flag would.
+    if args.use_config:
+        try:
+            _apply_config_credentials(args)
+        except Exception as e:
+            print(f"Warning: could not apply saved credentials: {e}",
+                  file=sys.stderr)
+
+        def _downgrade(feature, flag, available):
+            if getattr(args, feature) and not available and not _flag_given(argv, flag):
+                print(f"Notice: saved '{feature}' setting skipped (not available "
+                      f"in the {get_variant_name()} build).", file=sys.stderr)
+                setattr(args, feature, False)
+        _downgrade("diarize", "--diarize", has_diarization())
+        _downgrade("vision", "--vision", has_advanced_features())
+        _downgrade("summarize", "--summarize", has_advanced_features())
+        if args.translate_to and not has_advanced_features() \
+                and not _flag_given(argv, "--translate-to"):
+            print(f"Notice: saved translation setting skipped (not available "
+                  f"in the {get_variant_name()} build).", file=sys.stderr)
+            args.translate_to = None
 
     # Handle --list-tracks
     if args.list_tracks:
@@ -188,6 +359,17 @@ def run_cli(argv=None):
             variant = get_variant_name()
             print(f"Notice: --all in {variant} build enables transcription only "
                   f"(diarization/vision/summary not available).", file=sys.stderr)
+
+    # Negations run last so a caller can switch OFF anything --use-config or
+    # --all switched on (e.g. `--use-config --no-vision` for a fast pass).
+    if args.no_diarize:
+        args.diarize = False
+    if args.no_vision:
+        args.vision = False
+    if args.no_summarize:
+        args.summarize = False
+    if args.no_translate:
+        args.translate_to = None
 
     # Feature availability checks for explicit flags
     if args.diarize and not has_diarization():

@@ -179,6 +179,8 @@ Vision Analysis:
   --vision-interval SEC      Seconds between keyframes (default: 60)
   --vision-model MODEL       Vision model (default: google/gemini-2.5-flash)
   --vision-workers N         Concurrent vision API requests (default: 4)
+  --vision-change-threshold N  Skip near-duplicate frames (dhash bits, 0-64;
+                             0 disables)
 
 Meeting Summary:
   --summarize                Generate meeting summary
@@ -208,9 +210,31 @@ Audio Tracks:
 
 Other:
   --all                      Enable diarize + vision + summarize
+  --use-config               Apply the settings saved by the Scrivox GUI as
+                             defaults for this run (explicit flags still win)
+  --no-diarize / --no-vision / --no-summarize / --no-translate
+                             Turn a feature OFF even if --use-config/--all
+                             enabled it
   --clear-cache              Force re-transcription
   --confidence-threshold F   Min avg word probability to keep a segment (default: 0.50)
 ```
+
+### Scripting with your saved settings
+
+`--use-config` makes the CLI honor whatever you configured in the GUI (model,
+language, diarization, vision, output format, API keys/provider) without
+retyping it:
+
+```bash
+python main.py meeting.mp4 --use-config
+python main.py meeting.mp4 --use-config --format srt   # one override on top
+```
+
+Settings saved in the GUI that this build can't do (e.g. diarization on Lite)
+are skipped with a notice instead of failing the run. This is also the hook
+other apps use to drive Scrivox: [SimpleReliableRecorder](https://github.com/Deenyoro/SimpleReliableRecorder)
+auto-detects a Scrivox install next to it and adds a "Transcribe with Scrivox"
+button to its recordings library - transcripts follow your Scrivox settings.
 
 ## Building from Source
 
