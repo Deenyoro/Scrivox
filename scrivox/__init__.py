@@ -3,7 +3,7 @@
 Developed by Deenyoro at KawaConnect LLC.
 """
 
-__version__ = "1.7.0"
+__version__ = "1.8.0"
 __app_name__ = "Scrivox"
 __author__ = "Deenyoro"
 __org__ = "KawaConnect LLC"

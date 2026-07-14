@@ -90,6 +90,18 @@ all_hiddenimports += [
     'keyboard', 'pyperclip', 'dotenv',
 ]
 
+# Drag-and-drop: tkinterdnd2 ships the tkdnd Tcl binaries as package data,
+# which Analysis does not pick up on its own — without collect_data_files the
+# frozen app raises "can't find package tkdnd" and DnD silently degrades.
+# Optional at runtime (the GUI falls back to browse-only), so failures here
+# must not break the build.
+try:
+    from PyInstaller.utils.hooks import collect_data_files
+    all_datas += collect_data_files('tkinterdnd2')
+    all_hiddenimports += ['tkinterdnd2']
+except Exception:
+    pass
+
 # Metadata needed for version detection
 metadata_packages = [
     'torch', 'transformers', 'huggingface_hub', 'tokenizers',
