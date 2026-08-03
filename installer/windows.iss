@@ -45,9 +45,10 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 OutputDir=installer_out
 OutputBaseFilename={#MyDirName}-{#MyAppVersion}-win64-setup
-; lzma2/fast: the Full variant carries ~2 GB of CUDA DLLs and models; max
-; compression there costs tens of CI minutes for a few percent of size.
-Compression=lzma2/fast
+; lzma2/max, not /fast: GitHub caps release assets at 2 GiB and the variants
+; carry 3-4 GB of CUDA DLLs and models. /fast produced installers over that
+; cap; /max lands near the ~1.8 GB the equivalent .7z archives compress to.
+Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible

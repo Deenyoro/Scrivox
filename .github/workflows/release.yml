@@ -108,6 +108,7 @@ jobs:
         run: |
           & $env:ISCC "/DMyAppVersion=${{ steps.tag.outputs.VER }}" "/DVariant=Lite" installer\windows.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed (exit $LASTEXITCODE)" }
+          .\.github\check_asset_size.ps1 "installer\installer_out\Scrivox-Lite-*-setup.exe"
 
       # ── Regular build (all features, no bundled models) ──
       - name: Build Regular variant
@@ -128,6 +129,7 @@ jobs:
         run: |
           & $env:ISCC "/DMyAppVersion=${{ steps.tag.outputs.VER }}" "/DVariant=Regular" installer\windows.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed (exit $LASTEXITCODE)" }
+          .\.github\check_asset_size.ps1 "installer\installer_out\Scrivox-${{ steps.tag.outputs.VER }}-win64-setup.exe"
 
       # ── Full build (with bundled diarization models) ──
       - name: Build Full variant
@@ -150,6 +152,7 @@ jobs:
         run: |
           & $env:ISCC "/DMyAppVersion=${{ steps.tag.outputs.VER }}" "/DVariant=Full" installer\windows.iss
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed (exit $LASTEXITCODE)" }
+          .\.github\check_asset_size.ps1 "installer\installer_out\Scrivox-Full-*-setup.exe"
 
       # ── Release ──
       - name: Create GitHub Release
