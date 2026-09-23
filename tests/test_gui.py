@@ -438,6 +438,72 @@ class OutputNameTests(GuiTestCase):
         self.app.output_frame.consume_explicit_name()
         self.assertEqual(of.output_path_var.get(), "")
 
+    def test_chosen_name_never_overwrites_when_format_or_folder_changes(self):
+        self.make_app()
+        self.add_ready_job(self.media())
+        self.pump(0.3)
+        of = self.app.output_frame
+        chosen = os.path.join(self.dir, "Board minutes.txt")
+        with open(chosen, "w") as f:
+            f.write("confirmed in Save As")
+        taken = os.path.join(self.dir, "Board minutes.srt")
+        with open(taken, "w") as f:
+            f.write("keep me")
+        with mock.patch("tkinter.filedialog.asksaveasfilename", return_value=chosen):
+            of._rename()
+        of.format_var.set("srt")
+        self.assertEqual(of.output_path_var.get(),
+                         os.path.join(self.dir, "Board minutes (2).srt"))
+        # Back to the format the user confirmed in Save As: their exact choice
+        of.format_var.set("txt")
+        self.assertEqual(of.output_path_var.get(), chosen)
+        other = os.path.join(self.dir, "other")
+        os.mkdir(other)
+        with open(os.path.join(other, "Board minutes.txt"), "w") as f:
+            f.write("keep me too")
+        with mock.patch("tkinter.filedialog.askdirectory", return_value=other):
+            of._browse_output()
+        self.assertEqual(of.output_path_var.get(),
+                         os.path.join(other, "Board minutes (2).txt"))
+
+    def test_chosen_name_survives_a_failed_run_and_is_used_once(self):
+        import scrivox.ui.app as appmod
+        from scrivox.core.pipeline import PipelineError
+        self.make_app()
+        self.add_ready_job(self.media())
+        self.pump(0.3)
+        of = self.app.output_frame
+        chosen = os.path.join(self.dir, "Board minutes.txt")
+        with mock.patch("tkinter.filedialog.asksaveasfilename", return_value=chosen):
+            of._rename()
+        outcome = {"fail": True}
+
+        class FakePipeline:
+            def __init__(self, config, **kwargs):
+                self.config = config
+
+            def cancel(self):
+                pass
+
+            def run(self):
+                if outcome["fail"]:
+                    raise PipelineError("ffmpeg failed")
+                with open(self.config.output_path, "w") as f:
+                    f.write("hello")
+                return _FakeResult("hello", self.config.output_path)
+
+        with mock.patch.object(appmod, "TranscriptionPipeline", FakePipeline):
+            self.app._start_pipeline()
+            self.assertTrue(self.pump(5, until=lambda: not self.app._is_running))
+            self.pump(0.2)
+            self.assertEqual(of.output_path_var.get(), chosen)
+            outcome["fail"] = False
+            self.app._start_pipeline()
+            self.assertTrue(self.pump(5, until=lambda: not self.app._is_running))
+            self.pump(0.2)
+        self.assertTrue(os.path.isfile(chosen))
+        self.assertEqual(of.output_path_var.get(), "")
+
     def test_chosen_name_is_dropped_when_the_queue_changes(self):
         self.make_app()
         self.add_ready_job(self.media())

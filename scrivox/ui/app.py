@@ -1234,9 +1234,10 @@ class ScrivoxApp(_RootBase):
             configs.append(config)
         self._run_fmt = fmt
         self._download_active = False
-        # A name picked with "Rename..." is for this run only: running again
-        # must never overwrite that file
-        self.output_frame.consume_explicit_name()
+        # A name picked with "Rename..." is for one successful run only
+        # (dropped in _on_batch_complete), so running again never
+        # overwrites that file; a failed or cancelled run keeps it
+        self._run_explicit_name = self.output_frame.output_path_var.get()
 
         def _run_batch():
             results = []   # (index, PipelineResult)
@@ -1366,6 +1367,12 @@ class ScrivoxApp(_RootBase):
         self._set_running(False)
         self._pipeline = None
         self._notify_finished()
+        explicit = getattr(self, "_run_explicit_name", "")
+        self._run_explicit_name = ""
+        if explicit and any(os.path.normcase(os.path.abspath(r.output_path or ""))
+                            == os.path.normcase(os.path.abspath(explicit))
+                            for _, r in results):
+            self.output_frame.consume_explicit_name()
 
         if not results:
             first = errors[0][1] if errors else "No files were transcribed"

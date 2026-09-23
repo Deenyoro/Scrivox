@@ -6,7 +6,8 @@ import tkinter as tk
 from tkinter import ttk, filedialog
 
 from ...core.constants import OUTPUT_FORMATS
-from ..output_paths import default_output_path, format_from_label, format_label
+from ..output_paths import (default_output_path, format_from_label, format_label,
+                            unique_path)
 from ..theme import SP_S, SP_XS
 from ..widgets import LinkLabel, ToolTip, WrappingLabel, ellipsize
 
@@ -42,6 +43,7 @@ class OutputFrame(ttk.Frame):
         self._fmt_display_var = tk.StringVar(value=format_label("txt"))
         self._jobs = []           # [(file_path, audio_track)] for the name preview
         self._named_for = None    # the single job output_path_var was chosen for
+        self._chosen_path = ""    # the exact path the Save As dialog returned
         self._enabled = True
 
         self._build()
@@ -111,12 +113,8 @@ class OutputFrame(ttk.Frame):
         else:
             self._sub_cb.pack_forget()
         # A name picked with "Rename..." follows the format
-        explicit = self.output_path_var.get()
-        if explicit and fmt in OUTPUT_FORMATS:
-            base, ext = os.path.splitext(explicit)
-            new_ext = f".{fmt}"
-            if ext.lower() != new_ext:
-                self.output_path_var.set(base + new_ext)
+        if self.output_path_var.get() and fmt in OUTPUT_FORMATS:
+            self._follow_name()
         self._update_name_preview()
 
     # ── Folder ──
@@ -170,11 +168,26 @@ class OutputFrame(ttk.Frame):
                 self.config_manager.set("ui", "last_output_dir", os.path.normpath(path))
                 self.config_manager.set("ui", "output_dir", os.path.normpath(path))
             # A renamed single-file output follows the new folder
-            explicit = self.output_path_var.get()
-            if explicit:
-                self.output_path_var.set(os.path.join(os.path.normpath(path),
-                                                      os.path.basename(explicit)))
+            if self.output_path_var.get():
+                self._follow_name(folder=os.path.normpath(path))
             self._update_folder_display()
+
+    def _follow_name(self, folder=None):
+        """Move a "Rename..." name to the current format and/or a new folder.
+        The Save As dialog only confirmed overwriting the exact path it
+        returned; anywhere else an existing file gets "(2)" added instead of
+        being overwritten."""
+        chosen = self._chosen_path or self.output_path_var.get()
+        folder = folder or os.path.dirname(self.output_path_var.get() or chosen)
+        stem, ext = os.path.splitext(os.path.basename(chosen))
+        fmt = self.format_var.get()
+        if fmt in OUTPUT_FORMATS:
+            ext = f".{fmt}"
+        path = os.path.join(folder, stem + ext)
+        if os.path.normcase(path) != os.path.normcase(self._chosen_path):
+            path = unique_path(path)
+        if path != self.output_path_var.get():
+            self.output_path_var.set(path)
 
     # ── Output name ──
 
@@ -187,6 +200,7 @@ class OutputFrame(ttk.Frame):
                                            or self._jobs[0] != self._named_for):
             self.output_path_var.set("")
             self._named_for = None
+            self._chosen_path = ""
         self._update_name_preview()
 
     def planned_name(self):
@@ -238,12 +252,14 @@ class OutputFrame(ttk.Frame):
         )
         if path:
             self._named_for = self._jobs[0]
-            self.output_path_var.set(os.path.normpath(path))
+            self._chosen_path = os.path.normpath(path)
+            self.output_path_var.set(self._chosen_path)
             self._update_name_preview()
 
     def _clear_name(self):
         self.output_path_var.set("")
         self._named_for = None
+        self._chosen_path = ""
         self._update_name_preview()
 
     def consume_explicit_name(self):
@@ -252,6 +268,7 @@ class OutputFrame(ttk.Frame):
         if self.output_path_var.get():
             self.output_path_var.set("")
             self._named_for = None
+            self._chosen_path = ""
 
     def set_enabled(self, enabled):
         self._enabled = enabled
