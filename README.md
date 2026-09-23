@@ -280,6 +280,12 @@ python -m unittest discover -s tests
 # (a bare `python -m unittest` from the repo root also runs them;
 #  test_setup.py is skipped there because it is a script, not a test module)
 
+# GUI tests (tests/test_gui.py) need a display; on Linux run them under Xvfb.
+# Run them with the Tk 8.6 that the .exe ships (python.org Python 3.11),
+# not only Tk 9: widget sizes differ between the two.
+python -c "import tkinter; print(tkinter.TkVersion)"   # expect 8.6
+xvfb-run -a python -m unittest discover -s tests
+
 # Environment check: CUDA, ffmpeg, audio devices, cached models
 python test_setup.py
 ```

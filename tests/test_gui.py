@@ -6,6 +6,10 @@ network, ffmpeg or a GPU: the pipeline and the ffprobe track probe are
 replaced with fakes.
 
 Run with:  xvfb-run -a python -m unittest discover -s tests
+
+Run them under Tk 8.6 as well (python.org Python 3.11 on Windows, which the
+.exe ships with): widget metrics differ from Tk 9, so layout checks here
+avoid hard-coded pixel budgets.
 """
 
 import os
@@ -392,33 +396,27 @@ class QueueDisplayTests(GuiTestCase):
         self.assertGreaterEqual(int(qf._tree.column("status", "width")),
                                 font.measure("Cancelled"))
 
-    def test_queue_count_never_clips(self):
-        import tkinter.font as tkfont
+    def test_queue_count_sits_in_the_step_header(self):
+        # The count used to squeeze in beside Add/Remove/Clear, where at
+        # 125-150% scaling it never fit; the "Files" header always has room.
+        # No pixel assumptions, so this holds on Tk 8.6 and Tk 9 alike.
         self.make_app()
         self.app.geometry("1366x700")
+        card = self.app._cards[0]
         qf = self.app.queue_frame
-        for name in ("a.wav", "b.wav", "c.wav", "d.wav", "e.wav"):
+        self.assertFalse(card.note_label.winfo_manager())  # empty queue: no note
+        for name in ("a.wav", "b.wav", "c.wav"):
             self.add_ready_job(self.media(name))
-        for i in range(5):
-            qf.set_job_status(i, "done" if i else "error")
+        qf.set_job_status(0, "done")
+        qf.set_job_status(1, "error")
         self.pump(0.3)
-        text = qf._hint_label.cget("text")
-        self.assertIn(text, qf._hint_options + ("",))
-        self.assertFalse(text.endswith("\u00b7"))
-        from tkinter import ttk
-        name = ttk.Style(qf).lookup("Dim.TLabel", "font") or "TkDefaultFont"
-        try:
-            font = tkfont.nametofont(name)
-        except tk.TclError:
-            font = tkfont.Font(font=name)
-        self.assertLessEqual(font.measure(text), qf._hint_label.winfo_width())
-        # Squeezed further, it drops to the bare count or disappears
-        qf._hint_options = ("x" * 400, "5 files")
-        qf._fit_hint()
-        self.assertEqual(qf._hint_label.cget("text"), "5 files")
-        qf._hint_options = ("x" * 400,)
-        qf._fit_hint()
-        self.assertEqual(qf._hint_label.cget("text"), "")
+        self.assertEqual(card.note_label.cget("text"), "3 files")
+        self.assertTrue(card.note_label.winfo_ismapped())
+        self.assertGreaterEqual(card.note_label.winfo_width(),
+                                card.note_label.winfo_reqwidth())
+        qf._clear_all()
+        self.pump(0.1)
+        self.assertFalse(card.note_label.winfo_manager())
 
     def test_ellipsize_keeps_extension(self):
         import tkinter.font as tkfont

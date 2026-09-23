@@ -9,7 +9,6 @@ import os
 import queue
 import threading
 import tkinter as tk
-import tkinter.font as tkfont
 from tkinter import ttk, filedialog
 from dataclasses import dataclass
 from typing import List
@@ -46,11 +45,15 @@ class QueueFrame(ttk.Frame):
     """Job table with drop zone, multi-file browse and track selection."""
 
     def __init__(self, parent, config_manager=None, on_tracks_needed=None,
-                 on_change=None, **kwargs):
+                 on_change=None, on_summary=None, **kwargs):
         super().__init__(parent, **kwargs)
         self.config_manager = config_manager
         self._on_tracks_needed = on_tracks_needed  # callback(filepath, tracks) -> selected indices
         self._on_change = on_change or (lambda: None)
+        # Receives the queue summary ("2 files", "Checking 1 file...") for the
+        # step header; per-file done/failed lives in the Status column
+        self._on_summary = on_summary or (lambda text: None)
+        self.summary = ""
         self._jobs = {}           # tree iid -> JobConfig (ready jobs only)
         self._status = {}         # tree iid -> status key
         self._pending_probes = {}  # placeholder iid -> path
@@ -123,13 +126,6 @@ class QueueFrame(ttk.Frame):
         self._remove_btn.pack(side=tk.LEFT, padx=(0, SP_XS))
         self._clear_btn = ttk.Button(btn_bar, text="Clear", command=self._clear_all)
         self._clear_btn.pack(side=tk.LEFT)
-        # Queue summary sits beside the buttons (no extra line of height);
-        # packed last so it gives way first in a narrow column
-        self._btn_bar = btn_bar
-        self._hint_options = ()
-        self._hint_label = ttk.Label(btn_bar, text="", style="Dim.TLabel", anchor=tk.E)
-        self._hint_label.pack(side=tk.RIGHT, padx=(SP_XS, 0))
-        btn_bar.bind("<Configure>", lambda e: self._fit_hint(), add="+")
 
         self._notice_label = WrappingLabel(self, text="", style="Warning.TLabel",
                                            justify=tk.LEFT)
@@ -455,50 +451,16 @@ class QueueFrame(ttk.Frame):
 
         n = len(self._jobs)
         checking = len(self._pending_probes)
-        options = []
         if checking:
-            options.append(f"Checking {checking} file{'s' if checking != 1 else ''}\u2026")
+            summary = f"Checking {checking} file{'s' if checking != 1 else ''}\u2026"
         elif n:
-            done = sum(1 for s in self._status.values() if s == "done")
-            failed = sum(1 for s in self._status.values() if s == "error")
-            count = f"{n} file{'s' if n != 1 else ''}"
-            extra = "".join([f" \u00b7 {done} done" if done else "",
-                             f" \u00b7 {failed} failed" if failed else ""])
-            if extra:
-                options.append(count + extra)
-            options.append(count)
-        self._hint_options = tuple(options)
-        self._fit_hint()
+            summary = f"{n} file{'s' if n != 1 else ''}"
+        else:
+            summary = ""
+        if summary != self.summary:
+            self.summary = summary
+            self._on_summary(summary)
         self._on_change()
-
-    def _fit_hint(self):
-        """Show the longest queue summary that fits beside the buttons, or
-        nothing: the Status column already says what each file is doing,
-        and a clipped "2 files \u00b7" reads as a glitch."""
-        text = ""
-        if self._hint_options:
-            bar = self._btn_bar
-            bar.update_idletasks()
-            right = self._clear_btn.winfo_x() + self._clear_btn.winfo_width()
-            avail = bar.winfo_width() - right - 2 * bar.winfo_pixels(SP_XS)
-            if bar.winfo_width() <= 1:
-                # Not laid out yet: show the short form; <Configure> refits
-                avail = None
-            name = (ttk.Style(self).lookup("Dim.TLabel", "font")
-                    or ttk.Style(self).lookup("TLabel", "font") or "TkDefaultFont")
-            try:
-                font = tkfont.nametofont(name)
-            except tk.TclError:
-                font = tkfont.Font(font=name)
-            for option in self._hint_options:
-                if avail is None:
-                    text = self._hint_options[-1]
-                    break
-                if font.measure(option) <= avail:
-                    text = option
-                    break
-        if self._hint_label.cget("text") != text:
-            self._hint_label.configure(text=text)
 
     # Old name kept for callers
     _update_hint = _update_view

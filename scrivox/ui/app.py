@@ -513,6 +513,7 @@ class ScrivoxApp(_RootBase):
             card1.body, config_manager=self.config_manager,
             on_tracks_needed=self._show_track_dialog,
             on_change=self._schedule_readiness,
+            on_summary=card1.set_note,
         )
         self.queue_frame.pack(fill=tk.BOTH, expand=True)
 

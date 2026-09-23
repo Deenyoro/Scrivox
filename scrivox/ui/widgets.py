@@ -147,9 +147,22 @@ class StepCard(ttk.Frame):
         if subtitle:
             ttk.Label(header, text=subtitle, style="Dim.TLabel").pack(
                 side=tk.LEFT, padx=(SP_S, 0), pady=(px(2), 0))
+        # Short live status beside the title (e.g. "2 files"); the header
+        # always has room for it, unlike a crowded button row
+        self.note_label = ttk.Label(header, text="", style="Dim.TLabel")
 
         self.body = ttk.Frame(self)
         self.body.pack(fill=tk.BOTH, expand=True)
+
+    def set_note(self, text):
+        """Show `text` beside the title, or hide the note when empty."""
+        if self.note_label.cget("text") != text:
+            self.note_label.configure(text=text)
+        if text and not self.note_label.winfo_manager():
+            self.note_label.pack(side=tk.LEFT, padx=(SP_S, 0), pady=(px(2), 0),
+                                 after=self.title_label)
+        elif not text and self.note_label.winfo_manager():
+            self.note_label.pack_forget()
 
 
 class DropZone(tk.Canvas):
