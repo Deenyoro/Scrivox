@@ -127,10 +127,21 @@ class SettingsFrame(ttk.Frame):
         self._extras_btn = ttk.Button(head, text="", style="Disclosure.TButton", width=0,
                                       command=self.toggle_extras)
         self._extras_btn.pack(side=tk.LEFT)
-        self._extras_summary = ttk.Label(head, text="", style="Dim.TLabel", cursor="hand2")
+        self._extras_summary = ttk.Label(head, text="", style="Dim.TLabel")
         self._extras_summary.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(SP_XS, 0))
-        self._extras_summary.bind("<Button-1>", lambda e: self.toggle_extras())
+        # The summary is a second click target for the disclosure, but only
+        # while that button works (not during a run, not in Lite)
+        self._extras_summary.bind("<Button-1>", self._on_summary_click)
+        self._extras_summary.bind("<Enter>", lambda e: self._extras_summary.configure(
+            cursor="hand2" if self._summary_clickable() else ""))
         ToolTip(self._extras_btn, "Speaker names, on-screen content, summary and translation")
+        if not has_diarization():
+            # Lite has no extras to open: say so as plain text
+            self._extras_btn.pack_forget()
+            self._extras_summary.pack_configure(padx=0)
+            ToolTip(self._extras_summary, "Speaker labels, summaries, translation and\n"
+                                          "on-screen descriptions are in the Regular\n"
+                                          "and Full downloads.")
 
         self._extras = ttk.Frame(self, padding=(0, SP_XS, 0, 0))
 
@@ -473,7 +484,8 @@ class SettingsFrame(ttk.Frame):
         self.set_extras_open(not self._extras_open)
 
     def set_extras_open(self, is_open):
-        is_open = bool(is_open)
+        # Lite: nothing to open (the summary line says where extras are)
+        is_open = bool(is_open) and has_diarization()
         changed = is_open != self._extras_open
         self._extras_open = is_open
         if is_open and not self._extras.winfo_manager():
@@ -493,13 +505,22 @@ class SettingsFrame(ttk.Frame):
                 return
             w = getattr(w, "master", None)
 
+    def _summary_clickable(self):
+        return (bool(self._extras_btn.winfo_manager())
+                and not self._extras_btn.instate(["disabled"]))
+
+    def _on_summary_click(self, event=None):
+        if self._summary_clickable():
+            self.toggle_extras()
+
     def _update_extras_summary(self):
         if not hasattr(self, "_extras_btn"):
             return
         arrow = "\u25be" if self._extras_open else "\u25b8"
         self._extras_btn.configure(text=f"{arrow}  Extras")
         if not has_diarization():
-            self._extras_summary.configure(text="not included in Lite", style="Dim.TLabel")
+            self._extras_summary.configure(
+                text="Extras: in the Regular and Full downloads", style="Dim.TLabel")
             return
         if self._extras_open:
             # Open: the ticked boxes speak for themselves

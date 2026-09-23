@@ -312,6 +312,19 @@ class ExtrasTests(GuiTestCase):
         sf.reveal(sf._min_entry)
         self.assertTrue(sf.extras_open)
 
+    def test_extras_summary_ignores_clicks_while_running(self):
+        self.make_app()
+        sf = self.app.settings_frame
+        sf.set_extras_open(False)
+        self.app._set_running(True)
+        try:
+            sf._on_summary_click()
+            self.assertFalse(sf.extras_open)
+        finally:
+            self.app._set_running(False)
+        sf._on_summary_click()
+        self.assertTrue(sf.extras_open)
+
     def test_extras_state_is_remembered(self):
         import json
         self.make_app()
