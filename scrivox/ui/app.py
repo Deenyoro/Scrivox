@@ -137,6 +137,9 @@ class ScrivoxApp(_RootBase):
         self._last_switch = 0.0
         self._save_after_id = None
         self._readiness_after_id = None
+        self._hint_flash_id = None
+        self._closing = False
+        self._download_active = False
         self._preflight_issues = []
         self._loading = True
         self._run_jobs = []
@@ -602,14 +605,19 @@ class ScrivoxApp(_RootBase):
 
     # ── Preflight ──
 
-    def _run_preflight_checks(self):
+    def _run_preflight_checks(self, on_done=None):
         """Check ffmpeg and GPU availability without blocking the window
-        (`import torch` alone takes several seconds)."""
+        (`import torch` alone takes several seconds). `on_done(issues)` is
+        called on the Tk thread afterwards (used by "Check again")."""
         self._status_bar.configure(text="Checking graphics card and ffmpeg…")
 
         def _check():
             issues = []
             parts = []
+            # Pick up programs installed since Scrivox started (e.g. winget
+            # install ffmpeg): Windows only updates the registry, not the
+            # PATH this process inherited
+            winnative.refresh_path()
 
             # Determine CUDA source label
             if getattr(sys, "frozen", False):
@@ -643,6 +651,8 @@ class ScrivoxApp(_RootBase):
 
             try:
                 self.call_soon(self._apply_preflight, "   ·   ".join(parts), issues)
+                if on_done is not None:
+                    self.call_soon(on_done, issues)
             except (RuntimeError, tk.TclError):
                 pass  # window closed during startup checks
 
@@ -681,7 +691,34 @@ class ScrivoxApp(_RootBase):
             self.open_settings("keys")
             return
         from .dialogs.help_dialog import FixHelpDialog
-        FixHelpDialog(self, topic, on_recheck=self._run_preflight_checks)
+        FixHelpDialog(self, topic,
+                      on_recheck=lambda done: self._run_preflight_checks(on_done=done),
+                      on_restart=self._restart)
+
+    def _restart(self):
+        """Start a fresh Scrivox and close this one. A program installed
+        while Scrivox was open is then certainly found."""
+        if self._is_running:
+            messagebox.showinfo("Scrivox", "Scrivox can restart once the current "
+                                           "transcription has finished.", parent=self)
+            return
+        if getattr(sys, "frozen", False):
+            cmd = [sys.executable]
+        else:
+            cmd = [sys.executable, os.path.abspath(sys.argv[0])]
+        self._save_current_settings()  # the new window starts from them
+        env = dict(os.environ)
+        env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"  # a fully separate new process
+        try:
+            import subprocess
+            subprocess.Popen(cmd, env=env, close_fds=True,
+                             cwd=os.path.dirname(cmd[-1]) or None)
+        except OSError as e:
+            messagebox.showerror("Scrivox", f"Couldn't restart Scrivox:\n{e}\n\n"
+                                            "Close it and open it again from the Start menu.",
+                                 parent=self)
+            return
+        self._on_close()
 
     # ── Dialogs ──
 

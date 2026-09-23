@@ -49,10 +49,23 @@ def set_app_user_model_id():
         pass
 
 
-def _hwnd(win):
+def _user32():
+    """user32 with argtypes declared, so a 64-bit HWND is never squeezed
+    into a C int."""
     import ctypes
+    from ctypes import wintypes
+    u = ctypes.windll.user32
+    u.GetParent.argtypes = [wintypes.HWND]
+    u.GetParent.restype = wintypes.HWND
+    u.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                               ctypes.c_int, ctypes.c_int, wintypes.UINT]
+    u.SetWindowPos.restype = wintypes.BOOL
+    return u
+
+
+def _hwnd(win):
     win.update_idletasks()
-    return ctypes.windll.user32.GetParent(win.winfo_id()) or win.winfo_id()
+    return _user32().GetParent(win.winfo_id()) or win.winfo_id()
 
 
 def use_dark_title_bar(win):
@@ -60,17 +73,26 @@ def use_dark_title_bar(win):
 
     Attribute 20 is DWMWA_USE_IMMERSIVE_DARK_MODE on Windows 10 20H1+ and
     Windows 11; 19 is the pre-release value used by Windows 10 1809-1909.
+    Windows 10 only repaints the frame when told to, hence SWP_FRAMECHANGED.
     """
     if not IS_WINDOWS:
         return
     try:
         import ctypes
+        from ctypes import wintypes
         hwnd = _hwnd(win)
+        dwm = ctypes.windll.dwmapi.DwmSetWindowAttribute
+        dwm.argtypes = [wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
+        dwm.restype = ctypes.c_long
         value = ctypes.c_int(1)
         for attr in (20, 19):
-            if ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                    hwnd, attr, ctypes.byref(value), ctypes.sizeof(value)) == 0:
+            if dwm(hwnd, attr, ctypes.byref(value), ctypes.sizeof(value)) == 0:
                 break
+        SWP_NOSIZE, SWP_NOMOVE, SWP_NOZORDER, SWP_NOACTIVATE, SWP_FRAMECHANGED = (
+            0x1, 0x2, 0x4, 0x10, 0x20)
+        _user32().SetWindowPos(hwnd, None, 0, 0, 0, 0,
+                               SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+                               | SWP_FRAMECHANGED)
     except _WIN_ERRORS:
         pass
 
@@ -97,9 +119,77 @@ def flash_taskbar(win):
         FLASHW_ALL, FLASHW_TIMERNOFG = 0x3, 0xC
         info = FLASHWINFO(ctypes.sizeof(FLASHWINFO), _hwnd(win),
                           FLASHW_ALL | FLASHW_TIMERNOFG, 0, 0)
-        ctypes.windll.user32.FlashWindowEx(ctypes.byref(info))
+        flash = ctypes.windll.user32.FlashWindowEx
+        flash.argtypes = [ctypes.POINTER(FLASHWINFO)]
+        flash.restype = wintypes.BOOL
+        flash(ctypes.byref(info))
     except _WIN_ERRORS:
         pass
+
+
+def merge_path(current, machine, user, extra=()):
+    """PATH for a refreshed environment: the machine and user PATH from the
+    registry (as a new Explorer window would see them), then extra folders,
+    then anything only this process had. Duplicates are dropped (case- and
+    trailing-slash-insensitive), order is kept."""
+    seen = set()
+    out = []
+    for block in (machine, user, os.pathsep.join(extra), current):
+        for entry in (block or "").split(os.pathsep):
+            entry = entry.strip().strip('"')
+            if not entry:
+                continue
+            key = os.path.normcase(entry.rstrip("\\/"))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(entry)
+    return os.pathsep.join(out)
+
+
+def _registry_path(root, subkey):
+    import winreg
+    try:
+        with winreg.OpenKey(root, subkey) as key:
+            value, kind = winreg.QueryValueEx(key, "Path")
+    except OSError:
+        return ""
+    if kind == winreg.REG_EXPAND_SZ:
+        value = winreg.ExpandEnvironmentStrings(value)
+    return value
+
+
+def refresh_path():
+    """Re-read PATH from the registry into this process.
+
+    A program installed while Scrivox is open (e.g. `winget install ffmpeg`)
+    only updates the registry; running processes keep the PATH they started
+    with, so "Check again" would never find it. winget's portable-app link
+    folder is added too, since it may not be on PATH until the next sign-in.
+    Returns True if PATH changed. No-op outside Windows.
+    """
+    if not IS_WINDOWS:
+        return False
+    try:
+        import winreg
+        machine = _registry_path(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment")
+        user = _registry_path(winreg.HKEY_CURRENT_USER, "Environment")
+    except (ImportError, OSError):
+        return False
+    extra = []
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        links = os.path.join(local, "Microsoft", "WinGet", "Links")
+        if os.path.isdir(links):
+            extra.append(links)
+    old = os.environ.get("PATH", "")
+    new = merge_path(old, machine, user, extra)
+    if new != old:
+        os.environ["PATH"] = new
+        return True
+    return False
 
 
 def work_area(win):

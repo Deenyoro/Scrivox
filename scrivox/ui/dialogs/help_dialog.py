@@ -17,7 +17,7 @@ HELP_TOPICS = {
              "and open it."),
             "Paste this command and press Enter:",
             "@cmd",
-            "When it finishes, close Scrivox and open it again.",
+            "When it finishes, click \u201cCheck again\u201d below.",
         ],
         ("Prefer a manual install? Download a Windows build from ffmpeg.org, unzip it, "
          "and add its “bin” folder to your PATH."),
@@ -57,12 +57,22 @@ def _place(win, parent):
 
 
 class FixHelpDialog(tk.Toplevel):
-    """Step-by-step fix for a missing prerequisite, with a "Check again"."""
+    """Step-by-step fix for a missing prerequisite, with "Check again".
 
-    def __init__(self, parent, topic, on_recheck=None):
+    `on_recheck(done)` re-runs the startup checks and calls `done(issues)`
+    on the Tk thread when they finish. The dialog stays open and says
+    whether the problem is gone; if it isn't, restarting Scrivox (which
+    picks up a freshly installed program for sure) becomes the main action
+    when `on_restart` is given.
+    """
+
+    def __init__(self, parent, topic, on_recheck=None, on_restart=None):
         super().__init__(parent)
         self.withdraw()
         self.transient(parent)
+        self._topic = topic
+        self._on_recheck = on_recheck
+        self._on_restart = on_restart
         title, intro, steps, footer = HELP_TOPICS[topic]
         body = _dialog_frame(self, f"{title} - Scrivox")
         wrap = int(440 * parent.winfo_fpixels("1i") / 96.0)
@@ -90,16 +100,69 @@ class FixHelpDialog(tk.Toplevel):
             ttk.Label(body, text=footer, style="Dim.TLabel", wraplength=wrap,
                       justify=tk.LEFT).pack(anchor=tk.W, pady=(SP_S, 0))
 
+        # Result of "Check again" (hidden until used)
+        self._result = ttk.Label(body, text="", wraplength=wrap, justify=tk.LEFT)
+
         btns = ttk.Frame(body)
         btns.pack(fill=tk.X, pady=(SP_L, 0))
-        ttk.Button(btns, text="Close", command=self.destroy).pack(side=tk.RIGHT)
+        self._btns = btns
+        self._close_btn = ttk.Button(btns, text="Close", command=self.destroy)
+        self._close_btn.pack(side=tk.RIGHT)
+        self._restart_btn = ttk.Button(btns, text="Restart Scrivox", command=self._restart)
+        self._recheck_btn = None
         if on_recheck:
-            recheck = ttk.Button(btns, text="Check again", style="Accent.TButton",
-                                 command=lambda: (self.destroy(), on_recheck()))
-            recheck.pack(side=tk.RIGHT, padx=(0, SP_S))
-            recheck.focus_set()
+            self._recheck_btn = ttk.Button(btns, text="Check again", style="Accent.TButton",
+                                           command=self._recheck)
+            self._recheck_btn.pack(side=tk.RIGHT, padx=(0, SP_S))
+            self._recheck_btn.focus_set()
         self.bind("<Escape>", lambda e: (self.destroy(), "break")[1])
         _place(self, parent)
+
+    def _recheck(self):
+        self._recheck_btn.state(["disabled"])
+        self._recheck_btn.configure(text="Checking\u2026")
+        self._show_result("Checking\u2026", "Dim.TLabel")
+        self._on_recheck(self._on_recheck_done)
+
+    def _on_recheck_done(self, issues):
+        try:
+            if not self.winfo_exists():
+                return
+        except tk.TclError:
+            return
+        self._recheck_btn.state(["!disabled"])
+        self._recheck_btn.configure(text="Check again")
+        if self._topic not in issues:
+            what = "ffmpeg is installed" if self._topic == "ffmpeg" else "Graphics card found"
+            self._show_result(f"\u2713  {what}. You're all set.", "Success.TLabel")
+            self._recheck_btn.pack_forget()
+            self._restart_btn.pack_forget()
+            self._close_btn.configure(text="Done", style="Accent.TButton")
+            self._close_btn.focus_set()
+            return
+        if self._on_restart:
+            self._show_result(
+                "Still not found. If you've just installed it, restart Scrivox so it "
+                "can see the new program.", "Warning.TLabel")
+            # Restarting is now the likeliest fix: make it the main action
+            self._recheck_btn.configure(style="TButton")
+            self._restart_btn.configure(style="Accent.TButton")
+            if not self._restart_btn.winfo_manager():
+                # Leftmost of the right-aligned group = the default action
+                self._restart_btn.pack(side=tk.RIGHT, padx=(0, SP_S), after=self._recheck_btn)
+            self._restart_btn.focus_set()
+        else:
+            self._show_result("Still not found. Follow the steps above, then check again.",
+                              "Warning.TLabel")
+
+    def _show_result(self, text, style):
+        self._result.configure(text=text, style=style)
+        if not self._result.winfo_manager():
+            self._result.pack(anchor=tk.W, pady=(SP_S, 0), before=self._btns)
+
+    def _restart(self):
+        self.destroy()
+        self._on_restart()
 
     def _copy(self, text):
         self.clipboard_clear()
