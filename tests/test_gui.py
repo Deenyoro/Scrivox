@@ -634,5 +634,27 @@ class FixDialogTests(GuiTestCase):
         self.app._run_preflight_checks(**kw)
 
 
+
+@unittest.skipUnless(HAVE_DEPS, "needs torch and Pillow")
+class RestartCommandTests(unittest.TestCase):
+    def test_module_launch_restarts_with_dash_m(self):
+        import types
+
+        from scrivox.ui.app import restart_command
+        main = types.SimpleNamespace(__spec__=types.SimpleNamespace(name="scrivox.gui"))
+        cmd, cwd = restart_command(main)
+        self.assertEqual(cmd, [sys.executable, "-m", "scrivox.gui"])
+        self.assertEqual(cwd, os.getcwd())
+
+    def test_script_launch_restarts_the_script(self):
+        import types
+
+        from scrivox.ui.app import restart_command
+        with mock.patch.object(sys, "argv", ["main.py"]):
+            cmd, cwd = restart_command(types.SimpleNamespace(__spec__=None))
+        self.assertEqual(cmd, [sys.executable, os.path.abspath("main.py")])
+        self.assertEqual(cwd, os.path.dirname(os.path.abspath("main.py")))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -90,6 +90,20 @@ class _RootBase(tk.Tk, _DnDWrapper):
                 self._dnd_error = f"{type(e).__name__}: {e}"
 
 
+def restart_command(main_module=None):
+    """(argv, cwd) that starts this Scrivox again. The frozen exe restarts
+    itself; from source, `python -m scrivox.gui` must be relaunched with -m
+    (running gui.py as a script breaks its relative imports)."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable], os.path.dirname(sys.executable) or None
+    main = main_module if main_module is not None else sys.modules.get("__main__")
+    spec = getattr(main, "__spec__", None)
+    if spec is not None and getattr(spec, "name", ""):
+        return [sys.executable, "-m", spec.name], os.getcwd()
+    script = os.path.abspath(sys.argv[0])
+    return [sys.executable, script], os.path.dirname(script) or None
+
+
 class ScrivoxApp(_RootBase):
     """Main Scrivox application window."""
 
@@ -726,17 +740,13 @@ class ScrivoxApp(_RootBase):
             messagebox.showinfo("Scrivox", "Scrivox can restart once the current "
                                            "transcription has finished.", parent=self)
             return
-        if getattr(sys, "frozen", False):
-            cmd = [sys.executable]
-        else:
-            cmd = [sys.executable, os.path.abspath(sys.argv[0])]
+        cmd, cwd = restart_command()
         self._save_current_settings()  # the new window starts from them
         env = dict(os.environ)
         env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"  # a fully separate new process
         try:
             import subprocess
-            subprocess.Popen(cmd, env=env, close_fds=True,
-                             cwd=os.path.dirname(cmd[-1]) or None)
+            subprocess.Popen(cmd, env=env, close_fds=True, cwd=cwd)
         except OSError as e:
             messagebox.showerror("Scrivox", f"Couldn't restart Scrivox:\n{e}\n\n"
                                             "Close it and open it again from the Start menu.",
