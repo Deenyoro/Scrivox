@@ -568,6 +568,47 @@ class ProgressTests(GuiTestCase):
         pf.complete(elapsed=3)
         self.assertEqual(str(pf._headline.cget("style")), "HeadlineSuccess.TLabel")
 
+    def test_blocked_queue_is_not_called_ready(self):
+        self.make_app()
+        pf = self.app.progress_frame
+        self.add_ready_job(self.media())
+        self.add_ready_job(self.media("b.wav"))
+        from scrivox.ui.app import FIX_FFMPEG
+        self.app._preflight_issues = [FIX_FFMPEG]
+        self.app._refresh_readiness()
+        self.assertEqual(pf._step_text.get(), "2 files added")
+        self.assertIn("Install ffmpeg", pf._detail_text.get())
+        self.app._preflight_issues = []
+        self.app._refresh_readiness()
+        self.assertEqual(pf._step_text.get(), pf.READY_TEXT)
+
+    def test_error_clears_timer_and_gives_way_when_the_queue_changes(self):
+        self.make_app()
+        pf = self.app.progress_frame
+        self.add_ready_job(self.media())
+        self.app._refresh_readiness()
+        pf.start()
+        self.assertEqual(pf._elapsed_text.get(), "00:00")
+        pf.set_error("ffmpeg isn't installed")
+        self.assertEqual(pf._elapsed_text.get(), "")
+        self.app._refresh_readiness()  # same files: the error stays
+        self.assertEqual(pf._step_text.get(), "ffmpeg isn't installed")
+        self.add_ready_job(self.media("b.wav"))
+        self.app._refresh_readiness()
+        self.assertEqual(pf._step_text.get(), pf.READY_TEXT)
+        self.assertEqual(str(pf._headline.cget("style")), "Headline.TLabel")
+
+    def test_close_stops_a_running_marquee(self):
+        self.make_app()
+        pf = self.app.progress_frame
+        pf.start()
+        pf.update_step(1, 1, "Transcribing speech")
+        self.assertTrue(pf._marquee_running)
+        with mock.patch.object(pf, "_stop_marquee", wraps=pf._stop_marquee) as stop:
+            self.app._on_close()
+        self.assertTrue(stop.called)
+        self.app = None
+
     def test_cancel_during_download_says_it_continues(self):
         self.make_app()
         self.app._download_active = True

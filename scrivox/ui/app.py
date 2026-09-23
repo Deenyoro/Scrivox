@@ -955,8 +955,12 @@ class ScrivoxApp(_RootBase):
         self.output_frame.set_jobs([(j.file_path, j.audio_track) for j in jobs])
         problems = self._problems()
         self._problems_cache = problems
+        no_ffmpeg = FIX_FFMPEG in self._preflight_issues
         self.progress_frame.show_ready(
-            len(jobs), blocked=bool(problems) or FIX_FFMPEG in self._preflight_issues)
+            len(jobs), blocked=bool(problems) or no_ffmpeg,
+            queue_key=tuple((j.file_path, j.audio_track) for j in jobs),
+            reason=("Install ffmpeg first: see \u201cHow to fix\u201d above."
+                    if no_ffmpeg and not problems else None))
         # Start looks unavailable while something blocks the run (it stays
         # focusable: pressing it explains what's missing)
         self._start_btn.configure(style="AccentBlocked.TButton" if problems
@@ -1496,6 +1500,10 @@ class ScrivoxApp(_RootBase):
                 except tk.TclError:
                     pass
                 setattr(self, attr, None)
+        try:
+            self.progress_frame.shutdown()
+        except tk.TclError:
+            pass
         self.destroy()
 
 

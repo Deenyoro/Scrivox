@@ -47,6 +47,9 @@ class ProgressFrame(ttk.Frame):
         self._fix_command = None
         self._current_file = ""
         self._detail_is_status = False
+        # "idle" (ready), "running", "done", "error" or "cancelled"
+        self._state = "idle"
+        self._queue_key = None
 
         self._build()
 
@@ -132,9 +135,11 @@ class ProgressFrame(ttk.Frame):
         self._total_files = 1
         self._hide_file_row()
         self._stop_timer()
+        self._state = "idle"
 
     def start(self):
         """Start the elapsed timer."""
+        self._state = "running"
         self._start_time = time.time()
         self._set_headline("Starting…", detail="Preparing the first file")
         self._start_timer()
@@ -209,17 +214,32 @@ class ProgressFrame(ttk.Frame):
             self._file_row.pack_forget()
             self._file_bar_shown = False
 
-    def show_ready(self, count, blocked=False):
+    def show_ready(self, count, blocked=False, queue_key=None, reason=None):
         """While idle, say how many files are waiting instead of asking for
-        files that are already there."""
-        if self._step_text.get() != self.READY_TEXT:
-            return  # showing a finished/failed/cancelled run: keep it
+        files that are already there. `blocked` means something must be
+        fixed first, so the headline doesn't claim "Ready"; `reason` names
+        the fix (default: point at the note above Start). `queue_key`
+        identifies the queued files: once it changes after a failed run the
+        old error no longer applies and the pane goes back to ready."""
+        if self._state == "error":
+            if queue_key is None or queue_key == self._queue_key:
+                return  # still about the files that failed: keep it
+            self.reset()
+        elif self._state != "idle":
+            return  # showing a running/finished/cancelled run: keep it
+        self._queue_key = queue_key
+        headline = self.READY_TEXT
         if not count:
             detail = self.READY_DETAIL
         else:
             files = f"{count} file{'s' if count != 1 else ''}"
-            detail = (f"{files} added. See the note next to Start transcription."
-                      if blocked else f"{files} ready. Press Start transcription.")
+            if blocked:
+                headline = f"{files} added"
+                detail = reason or "Fix the note above Start transcription first."
+            else:
+                detail = f"{files} ready. Press Start transcription."
+        if self._step_text.get() != headline:
+            self._step_text.set(headline)
         if self._detail_text.get() != detail:
             self._detail_text.set(detail)
 
@@ -234,6 +254,7 @@ class ProgressFrame(ttk.Frame):
         self._elapsed_text.set("")
         self._progress_bar["value"] = 100
         self._file_bar["value"] = 100
+        self._state = "done"
         text = headline or "Done"
         if elapsed is not None:
             text = f"{text} in {_fmt_elapsed(elapsed)}"
@@ -246,6 +267,8 @@ class ProgressFrame(ttk.Frame):
         self._stop_marquee()
         self._hide_file_row()
         self._cancelling = False
+        self._state = "error"
+        self._elapsed_text.set("")  # a frozen timer next to an error reads as stuck
         self._set_headline(message, style="HeadlineError.TLabel",
                            detail=detail or "The log has the technical details.", fix=fix)
 
@@ -261,8 +284,17 @@ class ProgressFrame(ttk.Frame):
         self._stop_marquee()
         self._hide_file_row()
         self._cancelling = False
+        self._state = "cancelled"
+        self._elapsed_text.set("")
         self._set_headline("Cancelled", detail=detail or (
             "Nothing more will be processed. Press Start transcription to try again."))
+
+    def shutdown(self):
+        """Stop the marquee and timer before the window is destroyed (a
+        running indeterminate bar otherwise fires one more Tk callback into
+        a dead interpreter)."""
+        self._stop_timer()
+        self._stop_marquee()
 
     def _start_timer(self):
         self._update_elapsed()
