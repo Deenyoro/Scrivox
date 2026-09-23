@@ -348,6 +348,18 @@ class DropdownLabelTests(GuiTestCase):
         combo.set(label)
         combo.event_generate("<<ComboboxSelected>>")
         self.assertEqual(sf.model_var.get(), "medium")
+        # Opening the list marks the current model, not the first row
+        values = list(combo.cget("values"))
+        self.assertEqual(combo.current_row(), values.index(label))
+        self.assertNotEqual(values.index(label), 0)
+        self.app.tk.call("ttk::combobox::Post", combo)
+        try:
+            self.pump(0.2)
+            lb = combo._popdown_listbox()
+            self.assertEqual([int(i) for i in self.app.tk.splitlist(
+                self.app.tk.call(lb, "curselection"))], [values.index(label)])
+        finally:
+            self.app.tk.call("ttk::combobox::Unpost", combo)
 
 
 class QueueDisplayTests(GuiTestCase):

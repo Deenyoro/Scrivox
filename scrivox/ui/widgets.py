@@ -442,7 +442,9 @@ class AutocompleteCombobox(ttk.Combobox):
         # entry ("large-v3 - most accurate - 3.1 GB") while the field and
         # its variable keep the plain value ("large-v3")
         self._display_map = dict(kwargs.pop("display_map", None) or {})
-        super().__init__(master, values=self._all_values, **kwargs)
+        self._user_postcommand = kwargs.pop("postcommand", None)
+        super().__init__(master, values=self._all_values,
+                         postcommand=self._on_post, **kwargs)
         self._debounce_id = None
         self._selecting = False  # guard against re-entrant filtering
         self._multi_prefix = ""  # text before the last comma in multi_value mode
@@ -638,6 +640,58 @@ class AutocompleteCombobox(ttk.Combobox):
             self._popup = None
             self._listbox = None
         self._popup_active = False
+
+    # ── Native combobox dropdown ──
+
+    def _on_post(self):
+        """Runs just before the native list opens. Tk then highlights
+        `current()`, which is -1 when the field holds a plain value ("large-v3")
+        and the list holds descriptions, so it would mark the first row. Put
+        the highlight on the row for the current value once the list is up."""
+        if self._user_postcommand is not None:
+            self._user_postcommand()
+        lb = self._popdown_listbox()
+        if lb is not None:
+            try:
+                # A little inner padding so rows don't touch the list's edge
+                # (set before Tk sizes the list, so no row gets cut off)
+                self.tk.call(lb, "configure", "-borderwidth",
+                             self.winfo_pixels("3p"), "-relief", "flat")
+            except tk.TclError:
+                pass
+        self.after_idle(self._mark_current_row)
+
+    def _popdown_listbox(self):
+        try:
+            popdown = self.tk.call("ttk::combobox::PopdownWindow", self)
+            return f"{popdown}.f.l"
+        except tk.TclError:
+            return None
+
+    def current_row(self):
+        """Index in the list of the row for the field's value, or -1."""
+        text = self.get()
+        values = list(self.cget("values"))
+        if text in values:
+            return values.index(text)
+        for i, label in enumerate(values):
+            if self._display_map.get(label) == text:
+                return i
+        return -1
+
+    def _mark_current_row(self):
+        lb = self._popdown_listbox()
+        if lb is None:
+            return
+        try:
+            idx = self.current_row()
+            self.tk.call(lb, "selection", "clear", 0, "end")
+            if idx >= 0:
+                self.tk.call(lb, "selection", "set", idx)
+                self.tk.call(lb, "activate", idx)
+                self.tk.call(lb, "see", idx)
+        except tk.TclError:
+            pass
 
     # ── Native combobox dropdown selection ──
 
