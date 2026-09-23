@@ -310,8 +310,87 @@ def _get_whisper_cache_dir():
     return None
 
 
+def _dir_size(folder):
+    """Bytes under `folder`, counting real files only (HF cache snapshots are
+    symlinks to blobs on systems that support them)."""
+    total = 0
+    for dirpath, _dirs, files in os.walk(folder):
+        for name in files:
+            path = os.path.join(dirpath, name)
+            try:
+                if not os.path.islink(path):
+                    total += os.path.getsize(path)
+            except OSError:
+                pass
+    return total
+
+
+def ensure_model_downloaded(model_name, on_download, should_cancel=None):
+    """Fetch a stock Whisper model before loading it, reporting progress.
+
+    WhisperModel() would download it silently (several GB for large-v3) with
+    no way to show progress or cancel. Here the download runs on a helper
+    thread while this thread reports the bytes received so far through
+    `on_download(bytes_done)` twice a second and calls `should_cancel()`,
+    which may raise to abandon the wait. Returns True if a download happened.
+    Custom folders and already-cached models return False immediately.
+    """
+    if os.path.isdir(model_name):
+        return False
+    try:
+        from faster_whisper.utils import download_model
+    except ImportError:
+        return False
+    cached = True
+    try:
+        download_model(model_name, local_files_only=True)
+    except ValueError:
+        return False  # not a known model name; WhisperModel reports the error
+    except Exception:  # noqa: BLE001 - any lookup failure just means "not cached"
+        cached = False
+    if cached:
+        return False
+
+    repo_id = model_name if "/" in model_name else None
+    if repo_id is None:
+        try:
+            from faster_whisper.utils import _MODELS
+            repo_id = _MODELS.get(model_name)
+        except (ImportError, AttributeError):
+            repo_id = None
+    folder = None
+    if repo_id:
+        try:
+            from huggingface_hub import constants as hf_constants
+            folder = os.path.join(hf_constants.HF_HUB_CACHE,
+                                  "models--" + repo_id.replace("/", "--"))
+        except (ImportError, AttributeError):
+            folder = None
+
+    import threading
+    outcome = {}
+
+    def _download():
+        try:
+            outcome["path"] = download_model(model_name)
+        except BaseException as e:  # noqa: BLE001 - re-raised on the calling thread
+            outcome["error"] = e
+
+    worker = threading.Thread(target=_download, daemon=True)
+    worker.start()
+    on_download(0)
+    while worker.is_alive():
+        worker.join(0.5)
+        if should_cancel is not None:
+            should_cancel()
+        on_download(_dir_size(folder) if folder and os.path.isdir(folder) else 0)
+    if "error" in outcome:
+        raise outcome["error"]
+    return True
+
+
 def transcribe_audio(audio_path, model_name="large-v3", language=None, on_progress=print,
-                     on_fraction=None):
+                     on_fraction=None, on_download=None, should_cancel=None):
     """Transcribe audio using faster-whisper on CUDA.
 
     Whisper models are downloaded automatically on first use.
@@ -320,6 +399,9 @@ def transcribe_audio(audio_path, model_name="large-v3", language=None, on_progre
     Args:
         on_fraction: Optional callback receiving the within-step completion
             fraction (0.0-1.0) as segments stream in.
+        on_download: Optional callback(bytes_done). When given, a model that
+            isn't cached yet is downloaded first with progress reports
+            (see ensure_model_downloaded); `should_cancel` is polled meanwhile.
     """
     from faster_whisper import WhisperModel
 
@@ -331,6 +413,17 @@ def transcribe_audio(audio_path, model_name="large-v3", language=None, on_progre
         if os.path.isdir(custom_model_path):
             on_progress(f"Loading custom model from {custom_model_path}...")
             model_name = custom_model_path
+
+    if on_download is not None:
+        try:
+            if ensure_model_downloaded(model_name, on_download, should_cancel):
+                on_progress(f"Downloaded speech model '{model_name}'")
+        except Exception as e:
+            # Cancellation propagates; anything else falls through to
+            # WhisperModel, which retries and reports the real error
+            if type(e).__name__ == "PipelineCancelled":
+                raise
+            on_progress(f"Warning: model pre-download failed ({type(e).__name__}: {e})")
 
     on_progress(f"Loading faster-whisper '{model_name}' on CUDA (float16)...")
     model = WhisperModel(model_name, device="cuda", compute_type="float16")

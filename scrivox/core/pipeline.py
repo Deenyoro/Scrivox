@@ -144,7 +144,8 @@ class TranscriptionPipeline:
     def __init__(self, config: PipelineConfig, on_progress: Callable = print,
                  on_step: Optional[Callable] = None,
                  cancel_event: Optional[threading.Event] = None,
-                 on_fraction: Optional[Callable] = None):
+                 on_fraction: Optional[Callable] = None,
+                 on_download=None):
         """
         Args:
             config: Pipeline configuration
@@ -154,11 +155,15 @@ class TranscriptionPipeline:
                 without racing against which pipeline object is current
             on_fraction: Callback for within-step progress: on_fraction(frac)
                 with frac in 0.0-1.0 (currently reported during transcription)
+            on_download: Optional callback(model_name, bytes_done) while a
+                Whisper model is downloaded on first use (GUI progress).
+                When omitted, the model downloads silently as before.
         """
         self.config = config
         self.on_progress = on_progress
         self.on_step = on_step or (lambda *a: None)
         self.on_fraction = on_fraction
+        self.on_download = on_download
         self._cancel = cancel_event if cancel_event is not None else threading.Event()
 
     def cancel(self):
@@ -365,10 +370,16 @@ class TranscriptionPipeline:
                     )
                     transcribe_path = _pre_extracted_wav
 
+                download_cb = None
+                if self.on_download is not None:
+                    def download_cb(done, _model=cfg.model):
+                        self.on_download(_model, done)
                 segments, info = transcribe_audio(
                     transcribe_path, cfg.model, cfg.language,
                     on_progress=self.on_progress,
                     on_fraction=self.on_fraction,
+                    on_download=download_cb,
+                    should_cancel=self._check_cancel,
                 )
                 detected_lang = cfg.language or info.language
 
