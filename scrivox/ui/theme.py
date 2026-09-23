@@ -266,6 +266,8 @@ def configure_theme(root):
                     foreground=c["error"], font=FONTS["headline"])
     style.configure("HeadlineSuccess.TLabel", background=c["bg"],
                     foreground=c["success"], font=FONTS["headline"])
+    style.configure("HeadlineWarning.TLabel", background=c["bg"],
+                    foreground=c["warning"], font=FONTS["headline"])
     style.configure("Link.TLabel", background=c["bg"], foreground=c["accent"],
                     font=FONTS["small"] + ("underline",))
     style.map("Link.TLabel", foreground=[("active", c["accent_hover"])])

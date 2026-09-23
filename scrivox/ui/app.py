@@ -944,6 +944,7 @@ class ScrivoxApp(_RootBase):
         self.output_frame.set_jobs([(j.file_path, j.audio_track) for j in jobs])
         problems = self._problems()
         self._problems_cache = problems
+        self.progress_frame.show_ready(len(jobs), blocked=bool(problems))
         # Start looks unavailable while something blocks the run (it stays
         # focusable: pressing it explains what's missing)
         self._start_btn.configure(style="AccentBlocked.TButton" if problems
@@ -1395,7 +1396,8 @@ class ScrivoxApp(_RootBase):
             self.progress_frame.complete(
                 elapsed=total_elapsed,
                 headline=f"{len(results)} of {len(results) + len(errors)} files done",
-                detail=f"Failed: {headline} See the Log tab for details.")
+                detail=f"Failed: {headline} See the Log tab for details.",
+                warning=True)
         else:
             n = len(results)
             last = results[-1][1]

@@ -555,6 +555,21 @@ class ProgressTests(GuiTestCase):
         pf.set_error("Oops")
         self.assertFalse(pf._file_bar_shown)
 
+    def test_idle_pane_counts_queued_files_and_partial_failure_warns(self):
+        self.make_app()
+        pf = self.app.progress_frame
+        self.assertEqual(pf._detail_text.get(), pf.READY_DETAIL)
+        self.add_ready_job(self.media())
+        self.add_ready_job(self.media("b.wav"))
+        self.app._refresh_readiness()
+        self.assertEqual(pf._detail_text.get(), "2 files ready. Press Start transcription.")
+        pf.complete(elapsed=3, headline="1 of 2 files done", detail="Failed: x", warning=True)
+        self.assertEqual(str(pf._headline.cget("style")), "HeadlineWarning.TLabel")
+        self.app._refresh_readiness()
+        self.assertEqual(pf._detail_text.get(), "Failed: x")  # the result stays
+        pf.complete(elapsed=3)
+        self.assertEqual(str(pf._headline.cget("style")), "HeadlineSuccess.TLabel")
+
     def test_cancel_during_download_says_it_continues(self):
         self.make_app()
         self.app._download_active = True

@@ -209,9 +209,24 @@ class ProgressFrame(ttk.Frame):
             self._file_row.pack_forget()
             self._file_bar_shown = False
 
-    def complete(self, elapsed=None, headline=None, detail=""):
+    def show_ready(self, count, blocked=False):
+        """While idle, say how many files are waiting instead of asking for
+        files that are already there."""
+        if self._step_text.get() != self.READY_TEXT:
+            return  # showing a finished/failed/cancelled run: keep it
+        if not count:
+            detail = self.READY_DETAIL
+        else:
+            files = f"{count} file{'s' if count != 1 else ''}"
+            detail = (f"{files} added. See the note next to Start transcription."
+                      if blocked else f"{files} ready. Press Start transcription.")
+        if self._detail_text.get() != detail:
+            self._detail_text.set(detail)
+
+    def complete(self, elapsed=None, headline=None, detail="", warning=False):
         """Mark progress as complete. The headline carries the duration, so
-        the running timer is cleared (one duration, not two)."""
+        the running timer is cleared (one duration, not two). `warning` is
+        for a batch where some files failed: not shown as a success."""
         self._stop_timer()
         self._stop_marquee()
         self._hide_file_row()
@@ -222,7 +237,8 @@ class ProgressFrame(ttk.Frame):
         text = headline or "Done"
         if elapsed is not None:
             text = f"{text} in {_fmt_elapsed(elapsed)}"
-        self._set_headline(text, style="HeadlineSuccess.TLabel", detail=detail)
+        self._set_headline(text, detail=detail, style="HeadlineWarning.TLabel"
+                           if warning else "HeadlineSuccess.TLabel")
 
     def set_error(self, message, detail="", fix=None):
         """Show error state; `fix` adds a "How to fix" button."""
