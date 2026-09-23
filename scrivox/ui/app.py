@@ -636,10 +636,12 @@ class ScrivoxApp(_RootBase):
         def _check():
             issues = []
             parts = []
-            # Pick up programs installed since Scrivox started (e.g. winget
-            # install ffmpeg): Windows only updates the registry, not the
-            # PATH this process inherited
-            winnative.refresh_path()
+            # "Check again": pick up programs installed since Scrivox started
+            # (e.g. winget install ffmpeg). Windows only updates the registry,
+            # not the PATH this process inherited. Not done at startup, where
+            # the inherited PATH is already current.
+            if on_done is not None:
+                winnative.refresh_path()
 
             # Determine CUDA source label
             if getattr(sys, "frozen", False):

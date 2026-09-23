@@ -479,6 +479,17 @@ class FixDialogTests(GuiTestCase):
         refresh.assert_called_once()
         self.assertNotIn("ffmpeg", results[0])
 
+    def test_startup_preflight_leaves_path_alone(self):
+        # Rebuilding PATH at every launch could demote the bundled CUDA DLLs
+        import scrivox.ui.app as appmod
+        self.make_app()
+        with mock.patch.object(appmod.winnative, "refresh_path") as refresh, \
+                mock.patch.object(appmod.shutil, "which", return_value="/usr/bin/ffmpeg"):
+            self._real_preflight()
+            self.assertTrue(self.pump(10, until=lambda: not str(
+                self.app._status_bar.cget("text")).startswith("Checking")))
+        refresh.assert_not_called()
+
     def _real_preflight(self, **kw):
         # setUp stubs the startup check out; run the real one here
         for p in self._patches:

@@ -128,13 +128,15 @@ def flash_taskbar(win):
 
 
 def merge_path(current, machine, user, extra=()):
-    """PATH for a refreshed environment: the machine and user PATH from the
-    registry (as a new Explorer window would see them), then extra folders,
-    then anything only this process had. Duplicates are dropped (case- and
-    trailing-slash-insensitive), order is kept."""
+    """PATH for a refreshed environment: this process's PATH first, unchanged
+    and in order, then any machine/user registry entries and extra folders it
+    did not have yet. Keeping the process entries first matters: the frozen
+    build's runtime hook prepends the bundled torch/lib folder so the bundled
+    CUDA DLLs win over a system CUDA install. Duplicates are dropped (case-
+    and trailing-slash-insensitive), order is kept."""
     seen = set()
     out = []
-    for block in (machine, user, os.pathsep.join(extra), current):
+    for block in (current, machine, user, os.pathsep.join(extra)):
         for entry in (block or "").split(os.pathsep):
             entry = entry.strip().strip('"')
             if not entry:
