@@ -98,6 +98,25 @@ class ChatCompletionTests(unittest.TestCase):
         self.assertEqual(payload["max_tokens"], 2000)
         self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer k")
 
+    def test_429_is_retried_after_retry_after_delay(self, sleep):
+        with mock.patch.object(llm_client.requests, "post",
+                               side_effect=[_Resp(429, headers={"Retry-After": "3"}),
+                                            _openai_ok("ok")]) as post:
+            out = chat_completion([{"role": "user", "content": "x"}], "m", "k", self.URL)
+        self.assertEqual(out, "ok")
+        self.assertEqual(post.call_count, 2)
+        self.assertEqual(sleep.call_count, 1)
+        self.assertEqual(sleep.call_args.args[0], 3.0)
+
+    def test_anthropic_client_error_is_reported(self, _sleep):
+        with mock.patch.object(llm_client.requests, "post",
+                               return_value=_Resp(400, text="bad request")) as post:
+            out = chat_completion([{"role": "user", "content": "x"}], "claude-model",
+                                  "sk-ant", "https://api.anthropic.com/v1/messages")
+        self.assertEqual(post.call_count, 1)
+        self.assertTrue(is_error_response(out))
+        self.assertIn("400", out)
+
     def test_client_error_is_not_retried(self, _sleep):
         with mock.patch.object(llm_client.requests, "post",
                                return_value=_Resp(401, text="bad key")) as post:
