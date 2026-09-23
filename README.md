@@ -261,6 +261,8 @@ python build.py --full
 ```bash
 # Unit tests for output formatting and the LLM client (no GPU, network or API keys)
 python -m unittest discover -s tests
+# (a bare `python -m unittest` from the repo root also runs them;
+#  test_setup.py is skipped there because it is a script, not a test module)
 
 # Environment check: CUDA, ffmpeg, audio devices, cached models
 python test_setup.py
@@ -303,6 +305,7 @@ scrivox/
       progress_frame.py    Progress bar + elapsed timer
       log_frame.py         Scrollable log display (batched inserts)
       results_frame.py     Transcript display + copy/save
+tests/                     Offline unit tests (unittest)
 ```
 
 ---

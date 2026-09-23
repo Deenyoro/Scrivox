@@ -3,7 +3,16 @@
 import os
 import subprocess
 import sys
+import unittest
 import warnings
+
+if __name__ != "__main__":
+    # This is an environment check script, not a unit test module. Test
+    # runners (`python -m unittest`, `pytest`) pick it up by its name and
+    # would run every check at import time: loading .env, probing the GPU,
+    # downloading models and calling the paid OpenRouter API. Skip instead.
+    raise unittest.SkipTest("test_setup.py is a script: run `python test_setup.py`")
+
 warnings.filterwarnings("ignore", category=UserWarning)
 
 from dotenv import load_dotenv
