@@ -1319,11 +1319,15 @@ class ScrivoxApp(_RootBase):
         self._save_current_settings()
         sys.stdout = self._original_stdout
         sys.stderr = self._original_stderr
-        for attr in ("_drain_id", "_readiness_after_id", "_scroll_update_id"):
+        # Cancel pending timers on the widget that created them (cancelling
+        # through another widget leaves a stale command that Tk 9 rejects
+        # when the owner is destroyed)
+        for owner, attr in ((self, "_drain_id"), (self, "_readiness_after_id"),
+                            (self._left_canvas, "_scroll_update_id")):
             after_id = getattr(self, attr, None)
             if after_id is not None:
                 try:
-                    self.after_cancel(after_id)
+                    owner.after_cancel(after_id)
                 except tk.TclError:
                     pass
                 setattr(self, attr, None)
