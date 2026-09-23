@@ -6,10 +6,12 @@ import textwrap
 
 def format_timestamp(seconds, fmt="srt"):
     """Convert seconds to SRT or VTT timestamp format."""
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = int(seconds % 60)
-    ms = int((seconds % 1) * 1000)
+    # Work in whole milliseconds: truncating the float fraction turns
+    # e.g. 2.3 into 2.299999... -> "02,299", shifting cues 1 ms early.
+    total_ms = max(0, round(seconds * 1000))
+    h, rem = divmod(total_ms, 3_600_000)
+    m, rem = divmod(rem, 60_000)
+    s, ms = divmod(rem, 1000)
     if fmt == "vtt":
         return f"{h:02d}:{m:02d}:{s:02d}.{ms:03d}"
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
