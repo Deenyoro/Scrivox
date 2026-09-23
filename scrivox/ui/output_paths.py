@@ -20,6 +20,17 @@ FORMAT_DESCRIPTIONS = {
     "tsv": "Spreadsheet-friendly table",
 }
 
+# Dropdown entries for the format picker: id first (what file names and
+# config use), then what it is for
+FORMAT_LABELS = {
+    "txt": "txt  \u2013  plain text with timestamps",
+    "md": "md  \u2013  Markdown document",
+    "srt": "srt  \u2013  subtitles for video players",
+    "vtt": "vtt  \u2013  subtitles for the web",
+    "json": "json  \u2013  data with word timings",
+    "tsv": "tsv  \u2013  spreadsheet table",
+}
+
 # Approximate first-run download sizes of the stock Whisper models
 MODEL_INFO = {
     "tiny": ("Fastest, lowest accuracy", 75e6),
@@ -30,6 +41,38 @@ MODEL_INFO = {
     "large-v3-turbo": ("Near-best accuracy, much faster", 1.6e9),
     "distil-large-v3.5": ("Fast, English-focused", 1.5e9),
 }
+
+
+# Short comparison text for the model dropdown list
+MODEL_SHORT = {
+    "tiny": "fastest, least accurate",
+    "base": "very fast, basic",
+    "small": "fast, good",
+    "medium": "balanced",
+    "large-v3": "most accurate",
+    "large-v3-turbo": "near-best, fast",
+    "distil-large-v3.5": "fast, English",
+}
+
+
+def model_label(name):
+    """'large-v3  -  most accurate · 3.1 GB' for the dropdown list."""
+    info = MODEL_INFO.get(name)
+    if not info:
+        return name
+    return f"{name}  \u2013  {MODEL_SHORT.get(name, info[0].lower())} \u00b7 {format_size(info[1])}"
+
+
+def format_label(fmt):
+    return FORMAT_LABELS.get(fmt, fmt)
+
+
+def format_from_label(label):
+    """Inverse of format_label (also accepts a bare format id)."""
+    for fmt, text in FORMAT_LABELS.items():
+        if label == text:
+            return fmt
+    return label.split()[0] if label.strip() else ""
 
 
 def format_size(num_bytes):

@@ -17,7 +17,8 @@ from ...core.constants import VIDEO_EXTENSIONS, AUDIO_EXTENSIONS
 from ...core.media import list_audio_tracks
 from ..output_paths import is_media_file
 from ..theme import COLORS, SP_S, SP_XS
-from ..widgets import DropZone, TreeRowTooltip, WrappingLabel
+from ..widgets import (DropZone, TreeRowTooltip, TreeTextFitter, WrappingLabel,
+                       fit_column_to_labels)
 from .. import winnative
 
 
@@ -81,8 +82,13 @@ class QueueFrame(ttk.Frame):
         self._tree.heading("status", text="Status", anchor=tk.W)
         s = winnative_scale(self)
         self._tree.column("file", width=int(170 * s), minwidth=int(90 * s), stretch=True)
-        self._tree.column("track", width=int(92 * s), minwidth=int(50 * s), stretch=False)
-        self._tree.column("status", width=int(72 * s), minwidth=int(60 * s), stretch=False)
+        # "Track 1 · jpn" fits whole; longer labels are cut at the end
+        fit_column_to_labels(self._tree, "track", ["Track 10 \u00b7 eng"], "Audio track")
+        # Wide enough for the longest status ("Cancelled", "Checking...") in
+        # the actual font, at any DPI
+        fit_column_to_labels(self._tree, "status", _STATUS_TEXT.values(), "Status")
+        # Long names get a middle ellipsis that keeps the extension visible
+        self._fitter = TreeTextFitter(self._tree, ("file", "track"), keep_start=("track",))
 
         # Color rows by status
         self._tree.tag_configure("checking", foreground=COLORS["fg_dim"])
@@ -116,8 +122,11 @@ class QueueFrame(ttk.Frame):
         self._remove_btn.pack(side=tk.LEFT, padx=(0, SP_XS))
         self._clear_btn = ttk.Button(btn_bar, text="Clear", command=self._clear_all)
         self._clear_btn.pack(side=tk.LEFT)
+        # Queue summary sits beside the buttons (no extra line of height);
+        # packed last so it gives way first in a narrow column
+        self._hint_label = ttk.Label(btn_bar, text="", style="Dim.TLabel", anchor=tk.E)
+        self._hint_label.pack(side=tk.RIGHT, padx=(SP_XS, 0))
 
-        self._hint_label = WrappingLabel(self, text="", style="Dim.TLabel", justify=tk.LEFT)
         self._notice_label = WrappingLabel(self, text="", style="Warning.TLabel",
                                            justify=tk.LEFT)
 
@@ -262,9 +271,9 @@ class QueueFrame(ttk.Frame):
             return
         if self._is_queued(path, 0):
             return
-        iid = self._tree.insert("", tk.END, values=(os.path.basename(path), "",
-                                                    _STATUS_TEXT["checking"]),
+        iid = self._tree.insert("", tk.END, values=("", "", _STATUS_TEXT["checking"]),
                                 tags=("checking",))
+        self._fitter.set(iid, "file", os.path.basename(path))
         self._status[iid] = "checking"
         self._pending_probes[iid] = path
         threading.Thread(target=self._probe_worker, args=(iid, path), daemon=True).start()
@@ -323,6 +332,7 @@ class QueueFrame(ttk.Frame):
             index = self._tree.index(iid)
             self._tree.delete(iid)
             self._status.pop(iid, None)
+            self._fitter.forget(iid)
             for idx in selected:
                 if self._is_queued(path, idx):
                     continue  # duplicate jobs race on the same output path
@@ -337,9 +347,9 @@ class QueueFrame(ttk.Frame):
 
     def _make_job(self, iid, job):
         self._jobs[iid] = job
-        self._tree.item(iid, values=(os.path.basename(job.file_path),
-                                     job.track_label or "\u2014",
-                                     _STATUS_TEXT["pending"]), tags=())
+        self._tree.item(iid, values=("", "", _STATUS_TEXT["pending"]), tags=())
+        self._fitter.set(iid, "file", os.path.basename(job.file_path))
+        self._fitter.set(iid, "track", _short_track(job.track_label) or "\u2014")
         self._status[iid] = "pending"
 
     def _format_track_label(self, track):
@@ -352,9 +362,11 @@ class QueueFrame(ttk.Frame):
 
     def _row_tooltip(self, iid):
         job = self._jobs.get(iid)
-        if job:
-            return job.file_path
-        return self._pending_probes.get(iid, "")
+        path = job.file_path if job else self._pending_probes.get(iid, "")
+        if not path:
+            return ""
+        track = f"\nAudio: {job.track_label}" if job and job.track_label else ""
+        return f"{path}{track}\nRight-click for more options"
 
     # ── Removing ──
 
@@ -370,6 +382,7 @@ class QueueFrame(ttk.Frame):
         self._jobs.pop(iid, None)
         self._status.pop(iid, None)
         self._pending_probes.pop(iid, None)
+        self._fitter.forget(iid)
         self._track_queue = [t for t in self._track_queue if t[0] != iid]
         if self._tree.exists(iid):
             self._tree.delete(iid)
@@ -423,12 +436,14 @@ class QueueFrame(ttk.Frame):
 
     def _update_view(self):
         """Show the drop zone when empty, the table when not."""
-        has_rows = bool(self._tree.get_children())
-        for w in (self._drop_zone, self._list_frame, self._hint_label, self._notice_label):
+        rows = len(self._tree.get_children())
+        has_rows = bool(rows)
+        for w in (self._drop_zone, self._list_frame, self._notice_label):
             w.pack_forget()
         if has_rows:
+            # Only as tall as needed (2-4 rows), so step 3 stays in view
+            self._tree.configure(height=min(max(rows, 2), 4))
             self._list_frame.pack(fill=tk.BOTH, expand=True)
-            self._hint_label.pack(fill=tk.X, pady=(SP_XS, 0))
         else:
             self._drop_zone.pack(fill=tk.X)
         if self._notice_label.cget("text"):
@@ -441,12 +456,11 @@ class QueueFrame(ttk.Frame):
         elif n:
             done = sum(1 for s in self._status.values() if s == "done")
             failed = sum(1 for s in self._status.values() if s == "error")
-            hint = f"{n} file{'s' if n != 1 else ''} in the queue"
+            hint = f"{n} file{'s' if n != 1 else ''}"
             if done:
                 hint += f" \u00b7 {done} done"
             if failed:
                 hint += f" \u00b7 {failed} failed"
-            hint += " \u00b7 right-click for more"
         else:
             hint = ""
         self._hint_label.configure(text=hint)
@@ -504,6 +518,12 @@ class QueueFrame(ttk.Frame):
     def dnd_available(self):
         return self._dnd_available
 
+    def pulse(self):
+        """Draw attention to step 1 (Start was pressed with nothing queued)."""
+        if self._drop_zone.winfo_manager():
+            self._drop_zone.pulse()
+        self.focus_add()
+
     def focus_add(self):
         (self._add_btn if self._tree.get_children() else self._drop_zone).focus_set()
 
@@ -513,6 +533,13 @@ class QueueFrame(ttk.Frame):
         state = ["!disabled"] if enabled else ["disabled"]
         for btn in (self._add_btn, self._remove_btn, self._clear_btn):
             btn.state(state)
+
+
+def _short_track(label):
+    """'Track 1 · jpn · AC3' -> 'Track 1 · jpn' for the narrow table column
+    (the full label is in the row tooltip and the progress text)."""
+    parts = [p.strip() for p in label.split("\u00b7")] if label else []
+    return " \u00b7 ".join(parts[:2])
 
 
 def winnative_scale(widget):

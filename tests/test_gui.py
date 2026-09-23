@@ -267,5 +267,227 @@ class SettingsCompatTests(GuiTestCase):
         self.assertEqual(sf.get_settings_dict()["language"], "")
 
 
+class StartButtonTests(GuiTestCase):
+    def test_start_looks_unavailable_until_a_file_is_ready(self):
+        self.make_app()
+        self.pump(0.3)
+        self.assertEqual(self.app._start_btn.cget("style"), "AccentBlocked.TButton")
+        self.assertNotIn("disabled", self.app._start_btn.state())  # still focusable
+        self.add_ready_job(self.media())
+        self.pump(0.3)
+        self.assertEqual(self.app._start_btn.cget("style"), "Accent.TButton")
+
+    def test_refused_start_visibly_reacts(self):
+        # Regression: a refused click only rang the bell; the window looked
+        # exactly the same before and after
+        self.make_app()
+        self.pump(0.3)
+        with mock.patch.object(self.app.queue_frame._drop_zone, "pulse") as pulse:
+            self.app._start_btn.invoke()
+        pulse.assert_called_once()
+        self.assertEqual(self.app._action_hint.cget("style"), "SmallError.TLabel")
+        self.app._end_hint_flash()
+        self.assertEqual(self.app._action_hint.cget("style"), "Dim.TLabel")
+
+
+class ExtrasTests(GuiTestCase):
+    def test_extras_start_folded_and_open_when_an_extra_is_switched_on(self):
+        self.make_app()
+        if self.app.api_frame is None:
+            self.skipTest("Lite build: no extras")
+        sf = self.app.settings_frame
+        self.assertFalse(sf.extras_open)
+        self.assertFalse(sf._extras.winfo_ismapped())
+        sf.diarize_var.set(True)
+        sf._toggle_diarize()
+        self.pump(0.1)
+        self.assertTrue(sf.extras_open)
+
+    def test_fixing_a_problem_inside_folded_extras_opens_them(self):
+        self.make_app()
+        if self.app.api_frame is None:
+            self.skipTest("Lite build: no extras")
+        sf = self.app.settings_frame
+        sf.set_extras_open(False)
+        sf.reveal(sf._min_entry)
+        self.assertTrue(sf.extras_open)
+
+    def test_extras_state_is_remembered(self):
+        import json
+        self.make_app()
+        self.app.settings_frame.set_extras_open(True)
+        self.app._on_close()
+        self.app = None
+        with open(os.path.join(self.cfg_dir, "scrivox_config.json")) as f:
+            self.assertTrue(json.load(f)["ui"]["extras_open"])
+        self.make_app()
+        self.assertTrue(self.app.settings_frame.extras_open)
+
+
+class DropdownLabelTests(GuiTestCase):
+    def test_format_list_describes_each_format_but_stores_the_id(self):
+        self.make_app()
+        of = self.app.output_frame
+        values = of._fmt_combo.cget("values")
+        self.assertTrue(any("subtitles" in v for v in values))
+        srt = next(v for v in values if v.startswith("srt"))
+        of._fmt_combo.set(srt)
+        of._fmt_combo.event_generate("<<ComboboxSelected>>")
+        self.assertEqual(of.format_var.get(), "srt")
+        self.assertEqual(self.app._save_current_settings() or
+                         self.app.config_manager.get_last_settings()["output_format"], "srt")
+        of.format_var.set("vtt")
+        self.assertTrue(of._fmt_combo.get().startswith("vtt"))
+
+    def test_model_list_shows_size_but_field_keeps_model_name(self):
+        self.make_app()
+        sf = self.app.settings_frame
+        combo = sf._model_combo
+        label = next(v for v in combo.cget("values") if v.startswith("medium"))
+        self.assertIn("GB", label)
+        combo.set(label)
+        combo.event_generate("<<ComboboxSelected>>")
+        self.assertEqual(sf.model_var.get(), "medium")
+
+
+class QueueDisplayTests(GuiTestCase):
+    def test_long_names_keep_their_extension_and_status_fits(self):
+        import tkinter.font as tkfont
+        self.make_app()
+        self.app.geometry("900x600")
+        path = self.media("Team meeting 2024-03-14 (final) with the whole department.wav")
+        self.add_ready_job(path)
+        self.pump(0.3)
+        qf = self.app.queue_frame
+        iid = qf.get_job_ids()[0]
+        shown = qf._tree.set(iid, "file")
+        self.assertTrue(shown.endswith(".wav"), shown)
+        self.assertIn("\u2026", shown)
+        font = tkfont.nametofont("TkDefaultFont")
+        self.assertGreaterEqual(int(qf._tree.column("status", "width")),
+                                font.measure("Cancelled"))
+
+    def test_ellipsize_keeps_extension(self):
+        import tkinter.font as tkfont
+
+        from scrivox.ui.widgets import ellipsize
+        self.make_app()
+        font = tkfont.nametofont("TkDefaultFont")
+        text = "Team meeting 2024-03-14 (final).wav"
+        out = ellipsize(text, font, font.measure(text) // 2)
+        self.assertTrue(out.endswith(".wav"))
+        self.assertLessEqual(font.measure(out), font.measure(text) // 2)
+        self.assertEqual(ellipsize("a.wav", font, 1000), "a.wav")
+
+
+class OutputNameTests(GuiTestCase):
+    def test_single_file_shows_planned_name_and_rename_is_one_shot(self):
+        self.make_app()
+        path = self.media()
+        self.add_ready_job(path)
+        self.pump(0.3)
+        of = self.app.output_frame
+        self.assertIn("interview_transcript.txt", of._save_hint.cget("text"))
+        chosen = os.path.join(self.dir, "Board minutes.txt")
+        with mock.patch("tkinter.filedialog.asksaveasfilename", return_value=chosen):
+            of._rename()
+        self.assertEqual(of.output_path_var.get(), chosen)
+        self.assertIn("Board minutes.txt", of._save_hint.cget("text"))
+        # The next run uses it; afterwards the default name is back so a
+        # second run can't overwrite it
+        self.app.output_frame.consume_explicit_name()
+        self.assertEqual(of.output_path_var.get(), "")
+
+    def test_chosen_name_is_dropped_when_the_queue_changes(self):
+        self.make_app()
+        self.add_ready_job(self.media())
+        self.pump(0.3)
+        of = self.app.output_frame
+        with mock.patch("tkinter.filedialog.asksaveasfilename",
+                        return_value=os.path.join(self.dir, "x.txt")):
+            of._rename()
+        self.add_ready_job(self.media("second.wav"))
+        self.pump(0.4)
+        self.assertEqual(of.output_path_var.get(), "")
+
+
+class ProgressTests(GuiTestCase):
+    def test_download_then_loading_state_and_title(self):
+        self.make_app()
+        with mock.patch.object(type(self.app), "_is_running", new=True):
+            self.app._show_download("large-v3", 1_550_000_000)
+            self.assertIn("Downloading", self.app.progress_frame._step_text.get())
+            self.assertTrue(self.app.title().startswith("Downloading 50%"))
+            self.app._show_download("large-v3", None)
+            self.assertIn("Loading the speech model", self.app.progress_frame._step_text.get())
+            self.assertTrue(self.app.title().startswith("Loading"))
+
+    def test_completion_shows_one_duration_and_no_stale_file_row(self):
+        self.make_app()
+        pf = self.app.progress_frame
+        pf.start()
+        pf.update_file(2, 2, "b.wav")
+        self.assertTrue(pf._file_bar_shown)
+        pf.complete(elapsed=4.3)
+        self.assertFalse(pf._file_bar_shown)
+        self.assertEqual(pf._elapsed_text.get(), "")
+        self.assertIn("4.3 s", pf._step_text.get())
+        pf.update_file(1, 2, "a.wav")
+        pf.set_error("Oops")
+        self.assertFalse(pf._file_bar_shown)
+
+    def test_cancel_during_download_says_it_continues(self):
+        self.make_app()
+        self.app._download_active = True
+        self.app._on_pipeline_cancelled()
+        self.assertIn("background", self.app.progress_frame._detail_text.get())
+
+
+class FixDialogTests(GuiTestCase):
+    def test_check_again_offers_restart_when_still_missing(self):
+        from scrivox.ui.dialogs.help_dialog import FixHelpDialog
+        self.make_app()
+        restarted = []
+        dlg = FixHelpDialog(self.app, "ffmpeg", on_recheck=lambda done: done(["ffmpeg"]),
+                            on_restart=lambda: restarted.append(True))
+        dlg._recheck_btn.invoke()
+        self.pump(0.1)
+        self.assertEqual(dlg._restart_btn.cget("style"), "Accent.TButton")
+        self.assertTrue(dlg._restart_btn.winfo_ismapped())
+        dlg._restart_btn.invoke()
+        self.assertEqual(restarted, [True])
+
+    def test_check_again_confirms_when_fixed(self):
+        from scrivox.ui.dialogs.help_dialog import FixHelpDialog
+        self.make_app()
+        dlg = FixHelpDialog(self.app, "ffmpeg", on_recheck=lambda done: done([]),
+                            on_restart=lambda: None)
+        dlg._recheck_btn.invoke()
+        self.pump(0.1)
+        self.assertIn("installed", dlg._result.cget("text"))
+        self.assertEqual(dlg._close_btn.cget("text"), "Done")
+        dlg.destroy()
+
+    def test_preflight_rereads_path_and_reports_back(self):
+        import scrivox.ui.app as appmod
+        self.make_app()
+        results = []
+        with mock.patch.object(appmod.winnative, "refresh_path") as refresh, \
+                mock.patch.object(appmod.shutil, "which", return_value="/usr/bin/ffmpeg"):
+            self._real_preflight(on_done=results.append)
+            self.assertTrue(self.pump(10, until=lambda: bool(results)))
+        refresh.assert_called_once()
+        self.assertNotIn("ffmpeg", results[0])
+
+    def _real_preflight(self, **kw):
+        # setUp stubs the startup check out; run the real one here
+        for p in self._patches:
+            if getattr(p, "attribute", None) == "_run_preflight_checks":
+                p.stop()
+                self._patches.remove(p)
+                break
+        self.app._run_preflight_checks(**kw)
+
+
 if __name__ == "__main__":
     unittest.main()

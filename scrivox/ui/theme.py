@@ -329,6 +329,32 @@ def configure_theme(root):
                            ("active", c["accent_hover"])],
               foreground=[("disabled", c["fg_disabled"])])
 
+    # Primary action that can't run yet: same size and place, but a quiet
+    # slab with a dim label, so it doesn't invite a click. It stays
+    # focusable/clickable; a click explains what's missing.
+    style.configure("AccentBlocked.TButton", background=c["selection"],
+                    foreground=c["fg_disabled"], font=FONTS["button_bold"],
+                    padding=(px(16), px(8)), bordercolor=c["border"],
+                    lightcolor=c["selection"], darkcolor=c["selection"],
+                    focuscolor=c["accent"], **flat)
+    style.map("AccentBlocked.TButton",
+              background=[("pressed", c["button_hover"]), ("active", c["button_hover"])],
+              lightcolor=[("active", c["button_hover"])],
+              darkcolor=[("active", c["button_hover"])],
+              bordercolor=[("focus", c["accent"])],
+              foreground=[("active", c["fg_dim"])])
+
+    # Section disclosure ("▸ Extras"): reads as a heading, acts as a button
+    style.configure("Disclosure.TButton", background=c["bg"], foreground=c["frame_header"],
+                    font=FONTS["heading"], padding=(0, px(3), px(4), px(3)), anchor="w",
+                    bordercolor=c["bg"], lightcolor=c["bg"], darkcolor=c["bg"],
+                    focuscolor=c["accent"], borderwidth=1, relief="flat", focusthickness=1)
+    style.map("Disclosure.TButton",
+              background=[("active", c["bg"]), ("pressed", c["bg"]), ("disabled", c["bg"])],
+              lightcolor=[("active", c["bg"])], darkcolor=[("active", c["bg"])],
+              bordercolor=[("focus", c["accent"])],
+              foreground=[("disabled", c["fg_disabled"]), ("active", c["accent_hover"])])
+
     # Cancel: danger *outline* so it reads as "stop", not as another go button
     style.configure("Cancel.TButton", background=c["bg"], foreground=c["error"],
                     font=FONTS["button_bold"], padding=(px(16), px(8)),
@@ -407,6 +433,9 @@ def configure_theme(root):
                                 ("readonly", "focus", c["entry_bg"])],
               selectforeground=[("readonly", c["entry_fg"])],
               **field_map)
+    # Dropdown lists with descriptions: the list may be wider than the field
+    # (it opens over the right-hand pane, like a native Windows dropdown)
+    style.configure("Wide.TCombobox", postoffset=(0, 0, round(110 * scale), 0))
     style.configure("TSpinbox", background=c["entry_bg"], arrowcolor=c["fg_dim"],
                     arrowsize=max(8, round(10 * scale)), **field)
     style.map("TSpinbox", background=[("active", c["button_hover"])],

@@ -84,7 +84,32 @@ class SettingsDialog(tk.Toplevel):
             target = self.nametowidget(current)
             if target is self.api_frame:
                 target = self.api_frame.first_empty_field()
-            self.after(50, target.focus_set)
+            self._focus_later(target, 50)
+
+    def _focus_later(self, widget, ms):
+        """Focus `widget` once the window is shown; the timer is cancelled if
+        the dialog goes away first (no stale Tcl callbacks on exit)."""
+        if getattr(self, "_focus_after", None):
+            self.after_cancel(self._focus_after)
+
+        def _go():
+            self._focus_after = None
+            try:
+                widget.focus_set()
+            except tk.TclError:
+                pass
+        self._focus_after = self.after(ms, _go)
+        if not getattr(self, "_destroy_bound", False):
+            self.bind("<Destroy>", self._on_destroy, add="+")
+            self._destroy_bound = True
+
+    def _on_destroy(self, event):
+        if event.widget is self and getattr(self, "_focus_after", None):
+            try:
+                self.after_cancel(self._focus_after)
+            except tk.TclError:
+                pass
+            self._focus_after = None
 
     def hide(self):
         self.withdraw()
@@ -102,7 +127,7 @@ class SettingsDialog(tk.Toplevel):
                 if w is tab:
                     self.show()
                     self.notebook.select(tab)
-                    self.after(60, widget.focus_set)
+                    self._focus_later(widget, 60)
                     return True
                 w = w.master
         return False

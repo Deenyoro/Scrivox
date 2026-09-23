@@ -11,7 +11,7 @@ from ...core.constants import (
     TRANSLATION_LANGUAGES, WHISPER_LANGUAGES, WHISPER_MODELS,
 )
 from ...core.features import has_diarization, has_advanced_features
-from ..output_paths import describe_model
+from ..output_paths import describe_model, model_label
 from ..theme import SP_S, SP_XS, px
 # ToolTip is also imported from here by older modules
 from ..widgets import AutocompleteCombobox, LinkLabel, ToolTip, WrappingLabel
@@ -84,6 +84,9 @@ class SettingsFrame(ttk.Frame):
         self.translation_model_var = tk.StringVar(value=DEFAULT_TRANSLATION_MODEL)
 
         self._key_links = {}
+        self._missing_keys = set()
+        self._loading = False
+        self._extras_open = False
         self._build()
 
     # ── Layout ──
@@ -91,8 +94,13 @@ class SettingsFrame(ttk.Frame):
     def _build(self):
         # Transcription basics
         row = _field_row(self, "Model")
+        # The list compares models (speed/accuracy/download size); the field
+        # and the saved setting keep the plain model name
+        labels = {model_label(m): m for m in WHISPER_MODELS}
         self._model_combo = AutocompleteCombobox(row, textvariable=self.model_var,
-                                                 values=WHISPER_MODELS, state="normal", width=16)
+                                                 values=list(labels), display_map=labels,
+                                                 state="normal", width=16,
+                                                 style="Wide.TCombobox")
         self._model_combo.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(SP_S, 0))
         ToolTip(self._model_combo, "Bigger models are more accurate but slower.\n"
                                    "large-v3-turbo is a good everyday choice.\n"
@@ -112,12 +120,19 @@ class SettingsFrame(ttk.Frame):
                                   "if detection guesses wrong.")
         self._lang_combo.bind("<FocusOut>", self._normalize_language, add="+")
 
-        # ── Extras ──
-        ttk.Separator(self, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(SP_XS, SP_S))
-        ttk.Label(self, text="Extras", style="Header.TLabel").pack(anchor=tk.W, pady=(0, SP_XS))
+        # ── Extras: one summary row until opened, so steps 1-3 fit ──
+        ttk.Separator(self, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(SP_XS, px(2)))
+        head = ttk.Frame(self)
+        head.pack(fill=tk.X)
+        self._extras_btn = ttk.Button(head, text="", style="Disclosure.TButton", width=0,
+                                      command=self.toggle_extras)
+        self._extras_btn.pack(side=tk.LEFT)
+        self._extras_summary = ttk.Label(head, text="", style="Dim.TLabel", cursor="hand2")
+        self._extras_summary.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(SP_XS, 0))
+        self._extras_summary.bind("<Button-1>", lambda e: self.toggle_extras())
+        ToolTip(self._extras_btn, "Speaker names, on-screen content, summary and translation")
 
-        self._extras = ttk.Frame(self)
-        self._extras.pack(fill=tk.X)
+        self._extras = ttk.Frame(self, padding=(0, SP_XS, 0, 0))
 
         self._diarize_cb = self._vision_cb = self._summary_cb = self._translate_cb = None
         if has_diarization():
@@ -165,6 +180,9 @@ class SettingsFrame(ttk.Frame):
 
         # Initialize speaker mode display
         self._update_speaker_mode()
+        for var in (self.diarize_var, self.vision_var, self.summarize_var, self.translate_var):
+            var.trace_add("write", lambda *a: self._update_extras_summary())
+        self._update_extras_summary()
 
     def _sub_frame(self):
         """Indented options block that appears under its checkbox."""
@@ -386,6 +404,8 @@ class SettingsFrame(ttk.Frame):
 
         `missing` is a set drawn from {"hf", "llm"}.
         """
+        self._missing_keys = set(missing)
+        self._update_extras_summary()
         for key, row in self._key_links.items():
             need = ("hf" in missing) if key == "hf" else ("llm" in missing)
             if need and not row.winfo_manager():
@@ -436,8 +456,77 @@ class SettingsFrame(ttk.Frame):
     def _show_sub(self, frame, checkbox, visible):
         if visible and checkbox is not None:
             frame.pack(fill=tk.X, after=checkbox)
+            # Switching an extra on (not just restoring saved settings)
+            # shows its options
+            if not self._loading:
+                self.set_extras_open(True)
         else:
             frame.pack_forget()
+
+    # ── Extras disclosure ──
+
+    @property
+    def extras_open(self):
+        return self._extras_open
+
+    def toggle_extras(self):
+        self.set_extras_open(not self._extras_open)
+
+    def set_extras_open(self, is_open):
+        is_open = bool(is_open)
+        changed = is_open != self._extras_open
+        self._extras_open = is_open
+        if is_open and not self._extras.winfo_manager():
+            self._extras.pack(fill=tk.X)
+        elif not is_open and self._extras.winfo_manager():
+            self._extras.pack_forget()
+        self._update_extras_summary()
+        if changed:
+            self.event_generate("<<ExtrasToggled>>")
+
+    def reveal(self, widget):
+        """Open the extras section if `widget` lives inside it."""
+        w = widget
+        while w is not None:
+            if w is self._extras:
+                self.set_extras_open(True)
+                return
+            w = getattr(w, "master", None)
+
+    def _update_extras_summary(self):
+        if not hasattr(self, "_extras_btn"):
+            return
+        arrow = "\u25be" if self._extras_open else "\u25b8"
+        self._extras_btn.configure(text=f"{arrow}  Extras")
+        if not has_diarization():
+            self._extras_summary.configure(text="not included in Lite", style="Dim.TLabel")
+            return
+        if self._extras_open:
+            # Open: the ticked boxes speak for themselves
+            self._extras_summary.configure(text="", style="Dim.TLabel")
+            return
+        on = []
+        needs_key = False
+        if self.diarize_var.get():
+            on.append("speakers")
+            needs_key |= "hf" in self._missing_keys
+        llm_missing = "llm" in self._missing_keys
+        for var, name in ((self.vision_var, "on-screen content"),
+                          (self.summarize_var, "summary"), (self.translate_var, "translation")):
+            if has_advanced_features() and var.get():
+                on.append(name)
+                needs_key |= llm_missing
+        if on:
+            text = ", ".join(on)
+            text = text[0].upper() + text[1:]
+            if needs_key:
+                text += "  \u00b7  needs a key"
+            style = "Warning.TLabel" if needs_key else "TLabel"
+        else:
+            text = ("speakers, summary, translation\u2026" if has_advanced_features()
+                    else "identify speakers\u2026")
+            style = "Dim.TLabel"
+        self._extras_summary.configure(text=text, style=style)
 
     def _toggle_diarize(self):
         self._show_sub(self._diarize_frame, self._diarize_cb, self.diarize_var.get())
@@ -572,11 +661,15 @@ class SettingsFrame(ttk.Frame):
         self.min_speakers_var.set(str(mins) if mins else "")
         self.max_speakers_var.set(str(maxs) if maxs else "")
 
-        # Show/hide sub-frames
-        self._toggle_diarize()
-        self._toggle_vision()
-        self._toggle_summary()
-        self._toggle_translate()
+        # Show/hide sub-frames (without popping the extras section open)
+        self._loading = True
+        try:
+            self._toggle_diarize()
+            self._toggle_vision()
+            self._toggle_summary()
+            self._toggle_translate()
+        finally:
+            self._loading = False
 
     def get_settings_dict(self):
         """Return current settings as a dict for config persistence."""

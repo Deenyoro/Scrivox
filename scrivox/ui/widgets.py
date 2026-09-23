@@ -1,6 +1,7 @@
 """Reusable UI widgets for Scrivox."""
 
 import tkinter as tk
+import tkinter.font as tkfont
 from tkinter import ttk
 
 from .theme import COLORS, FONTS, SP_S, px
@@ -128,12 +129,11 @@ class StepCard(ttk.Frame):
     """
 
     def __init__(self, parent, number, title, subtitle="", **kwargs):
-        super().__init__(parent, style="Card.TFrame", padding=(px(12), px(10)), **kwargs)
+        super().__init__(parent, style="Card.TFrame", padding=(px(12), px(8)), **kwargs)
         header = ttk.Frame(self)
-        header.pack(fill=tk.X, pady=(0, SP_S))
+        header.pack(fill=tk.X, pady=(0, px(6)))
 
         badge_font = FONTS["button_bold"]
-        import tkinter.font as tkfont
         size = int(tkfont.Font(font=badge_font).metrics("linespace") * 1.25)
         badge = tk.Canvas(header, width=size, height=size, bg=COLORS["bg"],
                           highlightthickness=0, borderwidth=0)
@@ -153,16 +153,26 @@ class StepCard(ttk.Frame):
 
 
 class DropZone(tk.Canvas):
-    """Large dashed "drop files here" area shown while the queue is empty."""
+    """Compact dashed "drop files here" area shown while the queue is empty.
+
+    Kept short (about 80 px at 100%) so steps 1-3 and Start fit on one
+    screen; `pulse()` flashes it to point the user here when Start is
+    pressed with nothing queued.
+    """
+
+    HEIGHT = 80
 
     def __init__(self, parent, on_browse, dnd_available, **kwargs):
         s = _scale(parent)
-        super().__init__(parent, height=int(132 * s), bg=COLORS["bg"],
+        super().__init__(parent, height=int(self.HEIGHT * s), bg=COLORS["bg"],
                          highlightthickness=0, borderwidth=0, cursor="hand2",
                          takefocus=True, **kwargs)
         self._on_browse = on_browse
         self._dnd = dnd_available
         self._hover = False
+        self._pulse_left = 0
+        self._pulse_on = False
+        self._pulse_id = None
         self.bind("<Configure>", lambda e: self._draw())
         self.bind("<Button-1>", lambda e: self._on_browse())
         self.bind("<Enter>", lambda e: self._set_hover(True))
@@ -171,6 +181,7 @@ class DropZone(tk.Canvas):
         self.bind("<space>", lambda e: self._on_browse())
         self.bind("<FocusIn>", lambda e: self._draw())
         self.bind("<FocusOut>", lambda e: self._draw())
+        self.bind("<Destroy>", lambda e: self._stop_pulse(), add="+")
 
     def set_dnd_available(self, available):
         self._dnd = available
@@ -179,6 +190,32 @@ class DropZone(tk.Canvas):
     def _set_hover(self, hover):
         self._hover = hover
         self._draw()
+
+    def pulse(self, times=3):
+        """Flash the border a few times (drawing the eye to step 1)."""
+        self._stop_pulse()
+        self._pulse_left = times * 2
+        self._pulse_step()
+
+    def _pulse_step(self):
+        self._pulse_id = None
+        if self._pulse_left <= 0:
+            self._pulse_on = False
+            self._draw()
+            return
+        self._pulse_on = not self._pulse_on
+        self._pulse_left -= 1
+        self._draw()
+        self._pulse_id = self.after(180, self._pulse_step)
+
+    def _stop_pulse(self):
+        if self._pulse_id is not None:
+            try:
+                self.after_cancel(self._pulse_id)
+            except tk.TclError:
+                pass
+            self._pulse_id = None
+        self._pulse_on = False
 
     def _draw(self):
         self.delete("all")
@@ -191,25 +228,158 @@ class DropZone(tk.Canvas):
             focused = self.focus_get() is self
         except (KeyError, tk.TclError):
             focused = False
-        color = COLORS["accent"] if (self._hover or focused) else COLORS["border_strong"]
+        if self._pulse_on:
+            color, fill, width = COLORS["accent_hover"], COLORS["bg_secondary"], 2.5
+        else:
+            color = COLORS["accent"] if (self._hover or focused) else COLORS["border_strong"]
+            fill = COLORS["bg_secondary"] if self._hover else COLORS["bg"]
+            width = 1.5
         self.create_rectangle(m, m, w - m, h - m, outline=color,
-                              dash=(int(6 * s), int(4 * s)), width=max(1, int(1.5 * s)),
-                              fill=COLORS["bg_secondary"] if self._hover else COLORS["bg"])
-        cx = w / 2
-        # Simple "upload" glyph: arrow into a tray
-        gy = h * 0.30
-        g = 10 * s
-        self.create_line(cx, gy - g, cx, gy + g * 0.6, fill=COLORS["accent"],
-                         width=max(2, int(2 * s)), arrow=tk.LAST,
-                         arrowshape=(int(8 * s), int(9 * s), int(4 * s)))
-        self.create_line(cx - g * 1.2, gy + g * 0.4, cx - g * 1.2, gy + g * 1.1,
-                         cx + g * 1.2, gy + g * 1.1, cx + g * 1.2, gy + g * 0.4,
-                         fill=COLORS["accent"], width=max(2, int(2 * s)))
+                              dash=(int(6 * s), int(4 * s)), width=max(1, int(width * s)),
+                              fill=fill)
         main = ("Drop audio or video files here" if self._dnd
                 else "Click to choose audio or video files")
-        self.create_text(cx, h * 0.62, text=main, fill=COLORS["fg"], font=FONTS["body"])
-        sub = "or click to browse  \u00b7  Ctrl+O" if self._dnd else "Ctrl+O"
-        self.create_text(cx, h * 0.80, text=sub, fill=COLORS["fg_dim"], font=FONTS["small"])
+        sub = "or click to browse  \u00b7  Ctrl+O" if self._dnd else "or press Ctrl+O"
+        body_font = tkfont.Font(font=FONTS["body"])
+        small_font = tkfont.Font(font=FONTS["small"])
+        g = 9 * s  # glyph half-size
+        gap = 14 * s
+        text_w = max(body_font.measure(main), small_font.measure(sub))
+        group_w = 2.4 * g + gap + text_w
+        left = max(m + 8 * s, (w - group_w) / 2)
+        cy = h / 2
+        # "Upload" glyph (arrow into a tray) to the left of the text
+        gx = left + 1.2 * g
+        self.create_line(gx, cy - g * 1.2, gx, cy + g * 0.3, fill=COLORS["accent"],
+                         width=max(2, int(2 * s)), arrow=tk.LAST,
+                         arrowshape=(int(7 * s), int(8 * s), int(4 * s)))
+        self.create_line(gx - g * 1.2, cy + g * 0.1, gx - g * 1.2, cy + g * 0.9,
+                         gx + g * 1.2, cy + g * 0.9, gx + g * 1.2, cy + g * 0.1,
+                         fill=COLORS["accent"], width=max(2, int(2 * s)))
+        tx = left + 2.4 * g + gap
+        line_h = body_font.metrics("linespace")
+        self.create_text(tx, cy - line_h * 0.45, text=main, anchor=tk.W,
+                         fill=COLORS["fg"], font=FONTS["body"])
+        self.create_text(tx, cy + line_h * 0.6, text=sub, anchor=tk.W,
+                         fill=COLORS["fg_dim"], font=FONTS["small"])
+
+
+def ellipsize(text, font, max_px, keep_ext=True):
+    """Shorten `text` to fit `max_px` with a middle ellipsis, keeping the
+    end (and the file extension) visible: "Team meeting 2024…(final).wav".
+
+    `font` is a tkinter.font.Font.
+    """
+    if max_px <= 0 or font.measure(text) <= max_px:
+        return text
+    ell = "\u2026"
+    ext_len = 0
+    if keep_ext:
+        dot = text.rfind(".")
+        if 0 < dot and len(text) - dot <= 6:
+            ext_len = len(text) - dot
+    total = len(text)
+    # Keep about a third of the characters at the end (at least the
+    # extension), shrinking both sides until it fits
+    for keep in range(total - 1, 0, -1):
+        tail = min(keep - 1, max(ext_len, keep // 3))
+        head = keep - tail
+        candidate = text[:head].rstrip() + ell + (text[total - tail:] if tail else "")
+        if font.measure(candidate) <= max_px:
+            return candidate
+    return ell + (text[total - ext_len:] if ext_len else "")
+
+
+def ellipsize_end(text, font, max_px):
+    """'Track 1 · japanese' -> 'Track 1 · jap…' to fit `max_px`."""
+    if max_px <= 0 or font.measure(text) <= max_px:
+        return text
+    for keep in range(len(text) - 1, 0, -1):
+        candidate = text[:keep].rstrip() + "\u2026"
+        if font.measure(candidate) <= max_px:
+            return candidate
+    return "\u2026"
+
+
+class TreeTextFitter:
+    """Keeps Treeview cells readable in narrow columns: long values get a
+    middle ellipsis (the extension stays) and are re-fitted on resize.
+
+    Call `set(iid, column, full_text)` instead of writing the cell directly.
+    """
+
+    def __init__(self, tree, columns, keep_start=()):
+        self._tree = tree
+        self._columns = tuple(columns)
+        self._keep_start = set(keep_start)  # columns cut at the end instead
+        self._full = {}  # (iid, column) -> full text
+        self._after = None
+        self._font = None
+        tree.bind("<Configure>", self._schedule, add="+")
+        tree.bind("<ButtonRelease-1>", self._schedule, add="+")  # column drag
+
+    def font(self):
+        if self._font is None:
+            name = ttk.Style(self._tree).lookup("Treeview", "font") or "TkDefaultFont"
+            try:
+                self._font = tkfont.nametofont(name)
+            except tk.TclError:
+                self._font = tkfont.Font(font=name)
+        return self._font
+
+    def set(self, iid, column, text):
+        self._full[(iid, column)] = text
+        self._apply(iid, column)
+
+    def full(self, iid, column):
+        return self._full.get((iid, column), "")
+
+    def forget(self, iid):
+        for col in self._columns:
+            self._full.pop((iid, col), None)
+
+    def _apply(self, iid, column):
+        if not self._tree.exists(iid):
+            return
+        try:
+            width = int(self._tree.column(column, "width"))
+        except tk.TclError:
+            return
+        pad = int(14 * _scale(self._tree))
+        text = self._full.get((iid, column), "")
+        if column in self._keep_start:
+            fitted = ellipsize_end(text, self.font(), width - pad)
+        else:
+            fitted = ellipsize(text, self.font(), width - pad)
+        self._tree.set(iid, column, fitted)
+
+    def _schedule(self, event=None):
+        if self._after is None:
+            try:
+                self._after = self._tree.after_idle(self.refit)
+            except tk.TclError:
+                pass
+
+    def refit(self):
+        self._after = None
+        for (iid, column) in list(self._full):
+            if self._tree.exists(iid):
+                self._apply(iid, column)
+            else:
+                self._full.pop((iid, column), None)
+
+
+def fit_column_to_labels(tree, column, labels, heading=""):
+    """Width a fixed column so its longest label (or heading) never clips."""
+    name = ttk.Style(tree).lookup("Treeview", "font") or "TkDefaultFont"
+    try:
+        font = tkfont.nametofont(name)
+    except tk.TclError:
+        font = tkfont.Font(font=name)
+    widest = max([font.measure(t) for t in labels] + [font.measure(heading)])
+    width = widest + int(20 * _scale(tree))
+    tree.column(column, width=width, minwidth=width, stretch=False)
+    return width
 
 
 def call_in_ui(widget, fn, *args):
@@ -268,6 +438,10 @@ class AutocompleteCombobox(ttk.Combobox):
     def __init__(self, master=None, **kwargs):
         self._all_values = list(kwargs.pop("values", []))
         self._multi_value = kwargs.pop("multi_value", False)
+        # Optional {list label: stored value}: the list can describe each
+        # entry ("large-v3 - most accurate - 3.1 GB") while the field and
+        # its variable keep the plain value ("large-v3")
+        self._display_map = dict(kwargs.pop("display_map", None) or {})
         super().__init__(master, values=self._all_values, **kwargs)
         self._debounce_id = None
         self._selecting = False  # guard against re-entrant filtering
@@ -443,6 +617,7 @@ class AutocompleteCombobox(ttk.Combobox):
         self.icursor(tk.END)
 
     def _apply_selection(self, selected):
+        selected = self._display_map.get(selected, selected)
         self._selecting = True
         try:
             if self._multi_value and self._multi_prefix:
@@ -473,6 +648,11 @@ class AutocompleteCombobox(ttk.Combobox):
         self._selecting = True
         try:
             selected = self.get()
+            if selected in self._display_map:
+                selected = self._display_map[selected]
+                self.set(selected)
+                self.icursor(tk.END)
+                self.selection_clear()
             if self._multi_value and self._multi_prefix:
                 new_text = f"{self._multi_prefix}, {selected}"
                 self.set(new_text)

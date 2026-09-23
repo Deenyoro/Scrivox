@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
 from ..theme import COLORS, FONTS, SP_S, SP_XS, px
-from ..widgets import ToolTip
+from ..widgets import ToolTip, TreeTextFitter, fit_column_to_labels
 from .. import winnative
 
 # Tk's Text widget handles a few MB fine; only truly huge outputs are cut
@@ -50,7 +50,8 @@ class ResultsFrame(ttk.Frame):
         s = self.winfo_fpixels("1i") / 96.0
         self._batch_tree.column("file", width=int(200 * s), stretch=True)
         self._batch_tree.column("output", width=int(240 * s), stretch=True)
-        self._batch_tree.column("status", width=int(80 * s), stretch=False)
+        fit_column_to_labels(self._batch_tree, "status", ("Done", "Failed"), "Result")
+        self._batch_fitter = TreeTextFitter(self._batch_tree, ("file", "output"))
         self._batch_tree.tag_configure("error", foreground=COLORS["error"])
         self._batch_tree.tag_configure("done", foreground=COLORS["fg"])
         self._batch_tree.bind("<<TreeviewSelect>>", self._on_batch_select)
@@ -176,16 +177,20 @@ class ResultsFrame(ttk.Frame):
         if fmt:
             self._format = fmt
         self._batch = list(items)
+        for iid in self._batch_tree.get_children():
+            self._batch_fitter.forget(iid)
         self._batch_tree.delete(*self._batch_tree.get_children())
         for i, item in enumerate(self._batch):
             if item.get("error"):
-                values = (item["input"], "—", "Failed")
-                tag = "error"
+                output, status, tag = "—", "Failed", "error"
             else:
                 out = item.get("output_path")
-                values = (item["input"], os.path.basename(out) if out else "(not saved)", "Done")
-                tag = "done"
-            self._batch_tree.insert("", tk.END, iid=str(i), values=values, tags=(tag,))
+                output = os.path.basename(out) if out else "(not saved)"
+                status, tag = "Done", "done"
+            iid = self._batch_tree.insert("", tk.END, iid=str(i), values=("", "", status),
+                                          tags=(tag,))
+            self._batch_fitter.set(iid, "file", item["input"])
+            self._batch_fitter.set(iid, "output", output)
         self._batch_frame.pack(fill=tk.X, pady=(0, SP_S), before=self._text_container)
         first_ok = next((i for i, it in enumerate(self._batch) if not it.get("error")), 0)
         if self._batch:

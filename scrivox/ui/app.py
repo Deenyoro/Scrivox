@@ -50,7 +50,7 @@ from .output_paths import (
     plan_output_paths,
 )
 from .theme import COLORS, SP_M, SP_S, SP_XS, configure_theme, px, ui_scale
-from .widgets import LinkLabel, StepCard, WrappingLabel, set_state_recursive
+from .widgets import LinkLabel, StepCard, ToolTip, WrappingLabel, set_state_recursive
 from .frames.queue_frame import QueueFrame
 from .frames.settings_frame import SettingsFrame
 from .frames.output_frame import OutputFrame
@@ -155,6 +155,8 @@ class ScrivoxApp(_RootBase):
         sys.stderr = LogRedirect(self.log_frame, self, original_stdout=self._original_stderr)
 
         self._load_saved_settings()
+        self.settings_frame.set_extras_open(
+            bool(self.config_manager.get("ui", "extras_open", False)))
         self._setup_keyboard_shortcuts()
         self._watch_settings()
         self._loading = False
@@ -164,9 +166,12 @@ class ScrivoxApp(_RootBase):
         winnative.use_dark_title_bar(self)
         if self.config_manager.get("ui", "zoomed", False) or self._start_zoomed:
             self._zoom()
-        self.after(30, lambda: self._place_sash(self._initial_sash()))
-        self.after(100, self._run_preflight_checks)
-        self.after(150, self.queue_frame.focus_add)
+        # Kept so closing right after launch cancels them cleanly
+        self._startup_after = [
+            self.after(30, lambda: self._place_sash(self._initial_sash())),
+            self.after(100, self._run_preflight_checks),
+            self.after(150, self.queue_frame.focus_add),
+        ]
 
         # Handle window close
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -184,7 +189,15 @@ class ScrivoxApp(_RootBase):
                 try:
                     fn(*args)
                 except tk.TclError:
-                    pass  # widget went away (window closing)
+                    # Expected when the target widget is already gone (window
+                    # closing); anything else is a real bug worth logging
+                    owner = getattr(fn, "__self__", None)
+                    try:
+                        alive = isinstance(owner, tk.Misc) and bool(owner.winfo_exists())
+                    except tk.TclError:
+                        alive = False
+                    if alive:
+                        self._log_exception(*sys.exc_info())
                 except Exception:
                     self.report_callback_exception(*sys.exc_info())
         except queue.Empty:
@@ -212,7 +225,9 @@ class ScrivoxApp(_RootBase):
     def report_callback_exception(self, exc, val, tb):  # Tk callback errors
         self._report_exception(exc, val, tb)
 
-    def _report_exception(self, exc, val, tb, from_thread=False):
+    def _log_exception(self, exc, val, tb):
+        """Append a traceback to scrivox_error.log (and the real stderr).
+        Returns (details, log path or None)."""
         details = "".join(traceback.format_exception(exc, val, tb))
         stamp = time.strftime("%Y-%m-%d %H:%M:%S")
         log_path = None
@@ -226,6 +241,10 @@ class ScrivoxApp(_RootBase):
             self._original_stderr.write(details)
         except Exception:
             pass
+        return details, log_path
+
+    def _report_exception(self, exc, val, tb, from_thread=False):
+        details, log_path = self._log_exception(exc, val, tb)
 
         def _show():
             # One dialog at a time: a repeating error must not stack windows
@@ -475,7 +494,7 @@ class ScrivoxApp(_RootBase):
 
         inner = self._left_inner
         card1 = StepCard(inner, 1, "Files")
-        card1.pack(fill=tk.X, pady=(0, SP_M))
+        card1.pack(fill=tk.X, pady=(0, SP_S))
         self.queue_frame = QueueFrame(
             card1.body, config_manager=self.config_manager,
             on_tracks_needed=self._show_track_dialog,
@@ -484,21 +503,24 @@ class ScrivoxApp(_RootBase):
         self.queue_frame.pack(fill=tk.BOTH, expand=True)
 
         card2 = StepCard(inner, 2, "Options")
-        card2.pack(fill=tk.X, pady=(0, SP_M))
+        card2.pack(fill=tk.X, pady=(0, SP_S))
+        # Everything else (AI keys, subtitle tuning, hardware) is one click
+        # away in the card's header, not a line of its own
+        more = LinkLabel(card2.header, text="More settings…", command=self.open_settings)
+        more.pack(side=tk.RIGHT)
+        ToolTip(more, ("AI service keys, speaker model, subtitle timing, accuracy and "
+                       "graphics card options (Ctrl+,)") if has_diarization()
+                else "Subtitle timing, accuracy and graphics card options (Ctrl+,)")
+        self._more_link = more
         self.settings_frame = SettingsFrame(card2.body, on_setup_keys=self.open_settings)
         self.settings_frame.pack(fill=tk.X)
         self.settings_frame.bind("<<ExtrasChanged>>", lambda e: self._schedule_readiness())
+        self.settings_frame.bind("<<ExtrasToggled>>", lambda e: self._on_setting_changed())
 
         card3 = StepCard(inner, 3, "Save to")
-        card3.pack(fill=tk.X, pady=(0, SP_M))
+        card3.pack(fill=tk.X, pady=(0, SP_XS))
         self.output_frame = OutputFrame(card3.body, config_manager=self.config_manager)
         self.output_frame.pack(fill=tk.X)
-
-        more = ttk.Frame(inner)
-        more.pack(fill=tk.X, pady=(0, SP_S))
-        more_text = ("More settings: AI keys, subtitles, hardware…" if has_diarization()
-                     else "More settings: subtitles, accuracy, hardware…")
-        LinkLabel(more, text=more_text, command=self.open_settings).pack(side=tk.LEFT)
         self._cards = (card1, card2, card3)
 
     def _build_output_column(self, parent):
@@ -792,7 +814,7 @@ class ScrivoxApp(_RootBase):
         self.output_frame.output_dir_var.trace_add("write", lambda *a: self._schedule_readiness())
 
     def _on_setting_changed(self):
-        if self._loading:
+        if self._loading or self._closing:
             return
         self._schedule_readiness()
         if self._save_after_id is not None:
@@ -821,6 +843,7 @@ class ScrivoxApp(_RootBase):
         except tk.TclError:
             zoomed = False
         self.config_manager.set("ui", "zoomed", zoomed)
+        self.config_manager.set("ui", "extras_open", self.settings_frame.extras_open)
         if not zoomed:
             self.config_manager.set("ui", "geometry", self.geometry())
         try:
@@ -895,19 +918,38 @@ class ScrivoxApp(_RootBase):
         return problems
 
     def _schedule_readiness(self):
-        if self._readiness_after_id is None:
+        if self._readiness_after_id is None and not self._closing:
             self._readiness_after_id = self.after(120, self._refresh_readiness)
 
     def _refresh_readiness(self):
         """Update the line above the Start button and the missing-key links."""
-        self._readiness_after_id = None
+        if self._readiness_after_id is not None:
+            # Called directly while a scheduled refresh is pending: that one
+            # is now redundant (and must not outlive the window)
+            try:
+                self.after_cancel(self._readiness_after_id)
+            except tk.TclError:
+                pass
+            self._readiness_after_id = None
+        if self._closing:
+            return
         if self._loading:
             return
         self.settings_frame.set_key_hints(self._missing_keys())
         if self._is_running:
             return
+        jobs = self.queue_frame.get_jobs()
+        self.output_frame.set_jobs([(j.file_path, j.audio_track) for j in jobs])
         problems = self._problems()
         self._problems_cache = problems
+        # Start looks unavailable while something blocks the run (it stays
+        # focusable: pressing it explains what's missing)
+        self._start_btn.configure(style="AccentBlocked.TButton" if problems
+                                  else "Accent.TButton")
+        if self._hint_flash_id is not None:
+            if problems:
+                return  # a refused Start is being explained; don't overwrite it
+            self._cancel_hint_flash()
         if problems:
             msg, fix = problems[0]
             about_files = fix is None or fix == self.queue_frame.focus_add
@@ -918,7 +960,6 @@ class ScrivoxApp(_RootBase):
                 cursor="" if fix is None else "hand2")
             return
         self._problems_cache = []
-        jobs = self.queue_frame.get_jobs()
         fmt = self.output_frame.format_var.get()
         where = "in your chosen folder" if self.output_frame.output_dir_var.get() \
             else "next to each file" if len(jobs) > 1 else "next to the original"
@@ -936,11 +977,15 @@ class ScrivoxApp(_RootBase):
         fix = problems[0][1]
         if fix is None:
             return
-        if callable(fix) and not isinstance(fix, tk.Misc):
+        if fix == self.queue_frame.focus_add:
+            self.queue_frame.pulse()
+        elif callable(fix) and not isinstance(fix, tk.Misc):
             fix()
         elif isinstance(fix, tk.Misc):
             if self.settings_dialog.focus_widget(fix):
                 return
+            self.settings_frame.reveal(fix)  # opens Extras if it's in there
+            self.update_idletasks()
             fix.focus_set()
 
     def _validate(self):
@@ -952,8 +997,28 @@ class ScrivoxApp(_RootBase):
         self._problems_cache = problems
         self._refresh_readiness()
         self.bell()
+        self._flash_hint()
         self._fix_first_problem()
         return False
+
+    def _flash_hint(self):
+        """A refused Start must visibly react: the reason turns red for ~2 s."""
+        if self._hint_flash_id is not None:
+            self.after_cancel(self._hint_flash_id)
+        text = self._action_hint.cget("text")
+        if text and not text.startswith("\u26a0"):
+            text = "\u26a0  " + text
+        self._action_hint.configure(text=text, style="SmallError.TLabel")
+        self._hint_flash_id = self.after(2000, self._end_hint_flash)
+
+    def _cancel_hint_flash(self):
+        if self._hint_flash_id is not None:
+            self.after_cancel(self._hint_flash_id)
+            self._hint_flash_id = None
+
+    def _end_hint_flash(self):
+        self._cancel_hint_flash()
+        self._refresh_readiness()
 
     # ── Run ──
 
@@ -1022,6 +1087,7 @@ class ScrivoxApp(_RootBase):
     def _set_running(self, running):
         """Swap Start/Cancel and lock inputs during pipeline execution."""
         self._last_switch = time.monotonic()
+        self._cancel_hint_flash()
         if running:
             self._start_btn.configure(text="Cancel", style="Cancel.TButton", underline=-1)
             self._start_btn.state(["!disabled"])
@@ -1165,6 +1231,10 @@ class ScrivoxApp(_RootBase):
             config.output_path = out_path
             configs.append(config)
         self._run_fmt = fmt
+        self._download_active = False
+        # A name picked with "Rename..." is for this run only: running again
+        # must never overwrite that file
+        self.output_frame.consume_explicit_name()
 
         def _run_batch():
             results = []   # (index, PipelineResult)
@@ -1380,13 +1450,21 @@ class ScrivoxApp(_RootBase):
         if self._save_after_id is not None:
             self.after_cancel(self._save_after_id)
             self._save_after_id = None
+        self._closing = True
         self._save_current_settings()
         sys.stdout = self._original_stdout
         sys.stderr = self._original_stderr
         # Cancel pending timers on the widget that created them (cancelling
         # through another widget leaves a stale command that Tk 9 rejects
         # when the owner is destroyed)
+        for after_id in getattr(self, "_startup_after", ()):
+            try:
+                self.after_cancel(after_id)
+            except tk.TclError:
+                pass
+        self._startup_after = []
         for owner, attr in ((self, "_drain_id"), (self, "_readiness_after_id"),
+                            (self, "_hint_flash_id"), (self, "_save_after_id"),
                             (self._left_canvas, "_scroll_update_id")):
             after_id = getattr(self, attr, None)
             if after_id is not None:
