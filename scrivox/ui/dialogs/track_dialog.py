@@ -3,7 +3,7 @@
 import tkinter as tk
 from tkinter import ttk
 
-from ..theme import COLORS, FONTS
+from ..theme import COLORS
 
 
 class TrackDialog(tk.Toplevel):

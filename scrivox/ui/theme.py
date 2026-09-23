@@ -1,6 +1,5 @@
 """Theme configuration: colors, fonts, and ttk.Style setup."""
 
-import tkinter as tk
 from tkinter import ttk
 
 

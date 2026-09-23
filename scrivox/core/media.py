@@ -126,7 +126,7 @@ def extract_wav(input_path, track_index=0, on_progress=print):
     os.close(fd)
     on_progress(f"Extracting audio to WAV (track {track_index})...")
     try:
-        result = subprocess.run(
+        subprocess.run(
             ["ffmpeg", "-y", "-i", input_path,
              "-map", f"0:a:{track_index}",
              "-ac", "1", "-ar", "16000", "-vn", wav_path],

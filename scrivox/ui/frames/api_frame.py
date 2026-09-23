@@ -7,7 +7,6 @@ import threading
 
 from ...core.constants import LLM_PROVIDERS, DEFAULT_LLM_PROVIDER
 from ...core.diarizer import _get_bundled_models_dir
-from ..theme import COLORS, FONTS
 
 
 class ApiFrame(ttk.LabelFrame):

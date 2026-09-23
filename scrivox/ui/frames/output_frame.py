@@ -5,7 +5,6 @@ import tkinter as tk
 from tkinter import ttk, filedialog
 
 from ...core.constants import OUTPUT_FORMATS
-from ..theme import COLORS
 from .settings_frame import ToolTip
 
 

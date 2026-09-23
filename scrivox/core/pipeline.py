@@ -26,7 +26,7 @@ from .summarizer import generate_meeting_summary
 from .translator import (
     translate_segments, translate_strings, translate_text, TRANSLATABLE_HEADERS,
 )
-from .formatter import format_output, format_timestamp_human
+from .formatter import format_output
 
 
 @dataclass

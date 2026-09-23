@@ -19,12 +19,11 @@ except ImportError:
 from .. import __version__, __app_name__
 from ..config import ConfigManager
 from ..core.constants import OUTPUT_FORMATS
-from ..core.features import has_diarization, has_advanced_features, get_variant_name
+from ..core.features import has_diarization, get_variant_name
 from ..core.pipeline import (
-    PipelineConfig, PipelineCancelled, PipelineError, PipelineResult,
-    TranscriptionPipeline,
+    PipelineConfig, PipelineCancelled, PipelineError, TranscriptionPipeline,
 )
-from .theme import configure_theme, COLORS, FONTS
+from .theme import configure_theme, COLORS
 from .frames.queue_frame import QueueFrame
 from .frames.settings_frame import SettingsFrame
 from .frames.output_frame import OutputFrame

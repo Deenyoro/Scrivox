@@ -4,7 +4,6 @@ import tkinter as tk
 from tkinter import ttk
 
 from ...core.constants import DEFAULT_DIARIZATION_MODEL
-from ..theme import COLORS, FONTS
 from .settings_frame import ToolTip
 
 

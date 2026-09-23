@@ -4,7 +4,7 @@ import time
 import tkinter as tk
 from tkinter import ttk
 
-from ..theme import COLORS, FONTS
+from ..theme import FONTS
 
 
 class ProgressFrame(ttk.LabelFrame):

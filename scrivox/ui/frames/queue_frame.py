@@ -3,7 +3,7 @@
 import os
 import tkinter as tk
 from tkinter import ttk, filedialog
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List
 
 from ...core.constants import VIDEO_EXTENSIONS, AUDIO_EXTENSIONS
