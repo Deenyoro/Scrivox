@@ -75,7 +75,7 @@ class FixHelpDialog(tk.Toplevel):
             if step == "@cmd":
                 row = ttk.Frame(body)
                 row.pack(fill=tk.X, pady=(0, SP_S), padx=(px(22), 0))
-                cmd = ttk.Entry(row, font=FONTS["mono"])
+                cmd = ttk.Entry(row, font=FONTS["mono"], width=len(FFMPEG_WINGET) + 2)
                 cmd.insert(0, FFMPEG_WINGET)
                 cmd.state(["readonly"])
                 cmd.pack(side=tk.LEFT, fill=tk.X, expand=True)
