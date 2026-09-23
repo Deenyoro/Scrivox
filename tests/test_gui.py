@@ -367,6 +367,34 @@ class QueueDisplayTests(GuiTestCase):
         self.assertGreaterEqual(int(qf._tree.column("status", "width")),
                                 font.measure("Cancelled"))
 
+    def test_queue_count_never_clips(self):
+        import tkinter.font as tkfont
+        self.make_app()
+        self.app.geometry("1366x700")
+        qf = self.app.queue_frame
+        for name in ("a.wav", "b.wav", "c.wav", "d.wav", "e.wav"):
+            self.add_ready_job(self.media(name))
+        for i in range(5):
+            qf.set_job_status(i, "done" if i else "error")
+        self.pump(0.3)
+        text = qf._hint_label.cget("text")
+        self.assertIn(text, qf._hint_options + ("",))
+        self.assertFalse(text.endswith("\u00b7"))
+        from tkinter import ttk
+        name = ttk.Style(qf).lookup("Dim.TLabel", "font") or "TkDefaultFont"
+        try:
+            font = tkfont.nametofont(name)
+        except tk.TclError:
+            font = tkfont.Font(font=name)
+        self.assertLessEqual(font.measure(text), qf._hint_label.winfo_width())
+        # Squeezed further, it drops to the bare count or disappears
+        qf._hint_options = ("x" * 400, "5 files")
+        qf._fit_hint()
+        self.assertEqual(qf._hint_label.cget("text"), "5 files")
+        qf._hint_options = ("x" * 400,)
+        qf._fit_hint()
+        self.assertEqual(qf._hint_label.cget("text"), "")
+
     def test_ellipsize_keeps_extension(self):
         import tkinter.font as tkfont
 
