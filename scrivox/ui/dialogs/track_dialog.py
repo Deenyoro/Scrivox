@@ -3,13 +3,14 @@
 import tkinter as tk
 from tkinter import ttk
 
-from ..theme import COLORS
+from .. import winnative
+from ..theme import COLORS, SP_S, SP_XS, px
 
 
 class TrackDialog(tk.Toplevel):
     """Modal dialog for selecting audio tracks from a multi-track video file.
 
-    Returns list of selected track indices via self.result.
+    Returns list of selected track indices via self.result ([] = cancelled).
     """
 
     def __init__(self, parent, filename, tracks):
@@ -20,9 +21,9 @@ class TrackDialog(tk.Toplevel):
             tracks: List of track dicts from media.list_audio_tracks().
         """
         super().__init__(parent)
+        self.withdraw()
         self.title(f"Audio Tracks: {filename}")
         self.transient(parent)
-        self.grab_set()
         self.resizable(False, False)
 
         self.result = []
@@ -32,6 +33,9 @@ class TrackDialog(tk.Toplevel):
         self.configure(bg=COLORS["bg"])
         self._build(filename)
         self._center(parent)
+        self.deiconify()
+        winnative.use_dark_title_bar(self)
+        self.grab_set()
 
         self.protocol("WM_DELETE_WINDOW", self._on_cancel)
         # "break" consumes the event so the app's global Escape-to-cancel
@@ -46,48 +50,55 @@ class TrackDialog(tk.Toplevel):
         return "break"
 
     def _build(self, filename):
-        # Header
-        header = ttk.Label(self, text=f"Select audio tracks from: {filename}",
-                           style="Header.TLabel")
-        header.pack(padx=16, pady=(12, 8), anchor=tk.W)
+        body = ttk.Frame(self, padding=(px(20), px(16), px(20), px(16)))
+        body.pack(fill=tk.BOTH, expand=True)
 
-        # Track checkboxes
-        tracks_frame = ttk.Frame(self)
-        tracks_frame.pack(fill=tk.X, padx=16, pady=(0, 8))
+        ttk.Label(body, text="This video has several audio tracks",
+                  style="CardTitle.TLabel").pack(anchor=tk.W)
+        ttk.Label(body, text=f"Choose which ones to transcribe from {filename}. "
+                             "Each track becomes its own transcript.",
+                  style="Dim.TLabel", wraplength=int(420 * _scale(self)),
+                  justify=tk.LEFT).pack(anchor=tk.W, pady=(SP_XS, SP_S))
 
+        tracks_frame = ttk.Frame(body)
+        tracks_frame.pack(fill=tk.X, pady=(0, SP_S))
         for track in self._tracks:
             var = tk.BooleanVar(value=track.get("is_default", False))
+            var.trace_add("write", lambda *a: self._update_ok_state())
             self._check_vars.append(var)
+            ttk.Checkbutton(tracks_frame, text=self._format_track_label(track),
+                            variable=var).pack(anchor=tk.W, pady=px(2))
 
-            label = self._format_track_label(track)
-            cb = ttk.Checkbutton(tracks_frame, text=label, variable=var)
-            cb.pack(anchor=tk.W, pady=2)
-
-        # Auto-select by language
-        lang_frame = ttk.Frame(self)
-        lang_frame.pack(fill=tk.X, padx=16, pady=(0, 8))
-
+        # Select-by-language shortcut: choices come from the tracks themselves
+        langs = sorted({t.get("language", "") for t in self._tracks if t.get("language")})
         self._auto_lang_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(lang_frame, text="Auto-select by language:",
-                        variable=self._auto_lang_var,
-                        command=self._on_auto_lang_toggle).pack(side=tk.LEFT)
+        self._lang_var = tk.StringVar(value=langs[0] if langs else "en")
+        if langs:
+            lang_frame = ttk.Frame(body)
+            lang_frame.pack(fill=tk.X, pady=(0, SP_S))
+            ttk.Checkbutton(lang_frame, text="Select all tracks in",
+                            variable=self._auto_lang_var,
+                            command=self._on_auto_lang_toggle).pack(side=tk.LEFT)
+            self._lang_entry = ttk.Combobox(lang_frame, textvariable=self._lang_var,
+                                            values=langs, width=8, state="readonly")
+            self._lang_entry.state(["disabled"])
+            self._lang_entry.pack(side=tk.LEFT, padx=(SP_S, 0))
+            self._lang_entry.bind("<<ComboboxSelected>>", self._on_lang_typed)
+        else:
+            self._lang_entry = None
 
-        self._lang_entry = ttk.Entry(lang_frame, width=8)
-        self._lang_entry.insert(0, "en")
-        self._lang_entry.configure(state=tk.DISABLED)
-        self._lang_entry.pack(side=tk.LEFT, padx=(8, 0))
-        # Apply the language filter live as the user types
-        self._lang_entry.bind("<KeyRelease>", self._on_lang_typed)
+        self._none_hint = ttk.Label(body, text="", style="Warning.TLabel")
+        self._none_hint.pack(anchor=tk.W)
 
-        # Buttons
-        btn_frame = ttk.Frame(self)
-        btn_frame.pack(fill=tk.X, padx=16, pady=(0, 12))
-
-        self._ok_btn = ttk.Button(btn_frame, text="Add Selected", style="Accent.TButton",
-                                   command=self._on_ok)
-        self._ok_btn.pack(side=tk.RIGHT, padx=(8, 0))
-        ttk.Button(btn_frame, text="Cancel",
-                   command=self._on_cancel).pack(side=tk.RIGHT)
+        # Buttons: [Add selected] [Cancel], right-aligned (Windows order)
+        btn_frame = ttk.Frame(body)
+        btn_frame.pack(fill=tk.X, pady=(SP_S, 0))
+        cancel = ttk.Button(btn_frame, text="Cancel", command=self._on_cancel)
+        cancel.pack(side=tk.RIGHT)
+        self._ok_btn = ttk.Button(btn_frame, text="Add selected", style="Accent.TButton",
+                                  command=self._on_ok)
+        self._ok_btn.pack(side=tk.RIGHT, padx=(0, SP_S))
+        self._update_ok_state()
 
     def _format_track_label(self, track):
         """Format a human-readable track label."""
@@ -109,12 +120,19 @@ class TrackDialog(tk.Toplevel):
             parts.append("(default)")
         return ", ".join(parts)
 
+    def _update_ok_state(self):
+        any_selected = any(v.get() for v in self._check_vars)
+        self._ok_btn.state(["!disabled"] if any_selected else ["disabled"])
+        self._none_hint.configure(text="" if any_selected else "Tick at least one track.")
+
     def _on_auto_lang_toggle(self):
+        if self._lang_entry is None:
+            return
         if self._auto_lang_var.get():
-            self._lang_entry.configure(state=tk.NORMAL)
+            self._lang_entry.state(["!disabled"])
             self._apply_lang_filter()
         else:
-            self._lang_entry.configure(state=tk.DISABLED)
+            self._lang_entry.state(["disabled"])
 
     def _on_lang_typed(self, event=None):
         if self._auto_lang_var.get():
@@ -122,7 +140,7 @@ class TrackDialog(tk.Toplevel):
 
     def _apply_lang_filter(self):
         """Select tracks matching the language filter."""
-        lang = self._lang_entry.get().strip().lower()
+        lang = self._lang_var.get().strip().lower()
         if not lang:
             return
         for i, track in enumerate(self._tracks):
@@ -134,8 +152,8 @@ class TrackDialog(tk.Toplevel):
             self._apply_lang_filter()
         self.result = [i for i, var in enumerate(self._check_vars) if var.get()]
         if not self.result:
-            # Default to first track if nothing selected
-            self.result = [0]
+            self.bell()  # nothing ticked: keep the dialog open
+            return
         self.destroy()
 
     def _on_cancel(self):
@@ -147,5 +165,12 @@ class TrackDialog(tk.Toplevel):
         w = self.winfo_reqwidth()
         h = self.winfo_reqheight()
         x = parent.winfo_rootx() + (parent.winfo_width() - w) // 2
-        y = parent.winfo_rooty() + (parent.winfo_height() - h) // 2
-        self.geometry(f"+{x}+{y}")
+        y = parent.winfo_rooty() + (parent.winfo_height() - h) // 3
+        self.geometry(f"+{max(0, x)}+{max(0, y)}")
+
+
+def _scale(widget):
+    try:
+        return widget.winfo_fpixels("1i") / 96.0
+    except tk.TclError:
+        return 1.0

@@ -52,7 +52,12 @@ class LogRedirect(io.TextIOBase):
                 # LogFrame.append batches inserts, enforces the line cap, and
                 # preserves scroll position — one after() per write, not per
                 # widget operation
-                self.root.after(0, self.log_frame.append, "".join(lines_out))
+                # Hand over to the Tk thread without calling Tk from here
+                call_soon = getattr(self.root, "call_soon", None)
+                if call_soon is not None:
+                    call_soon(self.log_frame.append, "".join(lines_out))
+                else:
+                    self.root.after(0, self.log_frame.append, "".join(lines_out))
             except Exception:
                 pass  # widget may be destroyed
 

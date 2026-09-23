@@ -7,13 +7,19 @@ import threading
 
 from ...core.constants import LLM_PROVIDERS, DEFAULT_LLM_PROVIDER
 from ...core.diarizer import _get_bundled_models_dir
+from ..theme import SP_L, SP_S, SP_XS, px
+from ..widgets import WrappingLabel, call_in_ui
 
 
-class ApiFrame(ttk.LabelFrame):
-    """API key fields for HuggingFace and LLM providers."""
+class ApiFrame(ttk.Frame):
+    """API key fields for Hugging Face and AI (LLM) providers.
+
+    Lives on the "AI services" tab of the Settings dialog.
+    """
 
     def __init__(self, parent, config_manager=None, **kwargs):
-        super().__init__(parent, text="API KEYS", **kwargs)
+        kwargs.setdefault("padding", (px(16), px(12)))
+        super().__init__(parent, **kwargs)
         self.config_manager = config_manager
 
         self.hf_token_var = tk.StringVar()
@@ -28,79 +34,90 @@ class ApiFrame(ttk.LabelFrame):
         self._load_from_config()
 
     def _build(self):
-        # HuggingFace Token — always shown
+        ttk.Label(self, text="Speaker identification", style="Header.TLabel").pack(
+            anchor=tk.W, pady=(0, SP_XS))
         row = ttk.Frame(self)
-        row.pack(fill=tk.X, padx=8, pady=(8, 4))
-        ttk.Label(row, text="HF Token:").pack(side=tk.LEFT)
-        self._hf_entry = ttk.Entry(row, textvariable=self.hf_token_var, show="*")
-        self._hf_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 4))
+        row.pack(fill=tk.X, pady=(0, SP_XS))
+        ttk.Label(row, text="Hugging Face token").pack(side=tk.LEFT)
+        self._hf_entry = ttk.Entry(row, textvariable=self.hf_token_var, show="\u2022")
+        self._hf_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(SP_S, 0))
 
         if self._has_bundled:
-            ttk.Label(self, text="Optional \u2014 bundled models found",
-                      style="Dim.TLabel").pack(padx=8, pady=(0, 2), anchor=tk.W)
+            hf_hint = "Optional: this download already includes the speaker models."
         else:
-            ttk.Label(self, text="Required to download diarization models",
-                      style="Dim.TLabel").pack(padx=8, pady=(0, 2), anchor=tk.W)
+            hf_hint = ("Free. Create a \"Read\" token at huggingface.co/settings/tokens and "
+                       "accept the terms of pyannote/speaker-diarization-community-1.")
+        WrappingLabel(self, text=hf_hint, style="Dim.TLabel", justify=tk.LEFT).pack(
+            fill=tk.X, pady=(0, SP_L))
 
+        ttk.Label(self, text="AI service (summaries, translation, on-screen content)",
+                  style="Header.TLabel").pack(anchor=tk.W, pady=(0, SP_XS))
         # LLM Provider
         row = ttk.Frame(self)
-        row.pack(fill=tk.X, padx=8, pady=(0, 4))
-        ttk.Label(row, text="Provider:").pack(side=tk.LEFT)
+        row.pack(fill=tk.X, pady=(0, SP_XS))
+        ttk.Label(row, text="Provider").pack(side=tk.LEFT)
         providers = list(LLM_PROVIDERS.keys()) + ["Custom"]
         provider_combo = ttk.Combobox(row, textvariable=self.provider_var,
                                        values=providers, state="readonly", width=16)
-        provider_combo.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
+        provider_combo.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(SP_S, 0))
         provider_combo.bind("<<ComboboxSelected>>", self._on_provider_change)
 
         # API Key (for OpenRouter/OpenAI/Ollama/Custom)
         self._api_key_frame = ttk.Frame(self)
-        self._api_key_frame.pack(fill=tk.X, padx=8, pady=(0, 4))
-        ttk.Label(self._api_key_frame, text="API Key:  ").pack(side=tk.LEFT)
-        self._or_entry = ttk.Entry(self._api_key_frame, textvariable=self.openrouter_key_var, show="*")
-        self._or_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 4))
+        self._api_key_frame.pack(fill=tk.X, pady=(0, SP_XS))
+        ttk.Label(self._api_key_frame, text="API key").pack(side=tk.LEFT)
+        self._or_entry = ttk.Entry(self._api_key_frame, textvariable=self.openrouter_key_var,
+                                   show="\u2022")
+        self._or_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(SP_S, 0))
 
         # Anthropic API Key (shown when Anthropic selected)
         self._anthropic_key_frame = ttk.Frame(self)
-        ttk.Label(self._anthropic_key_frame, text="API Key:  ").pack(side=tk.LEFT)
+        ttk.Label(self._anthropic_key_frame, text="API key").pack(side=tk.LEFT)
         self._anthropic_entry = ttk.Entry(self._anthropic_key_frame,
-                                           textvariable=self.anthropic_key_var, show="*")
-        self._anthropic_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 4))
+                                           textvariable=self.anthropic_key_var, show="\u2022")
+        self._anthropic_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(SP_S, 0))
 
         # Per-provider key hint (text set in _on_provider_change)
-        self._key_hint = ttk.Label(self, text="", style="Dim.TLabel")
+        self._key_hint = WrappingLabel(self, text="", style="Dim.TLabel", justify=tk.LEFT)
 
         # Custom base URL (hidden by default)
         self._custom_frame = ttk.Frame(self)
-        ttk.Label(self._custom_frame, text="Base URL:").pack(side=tk.LEFT)
+        ttk.Label(self._custom_frame, text="Server URL").pack(side=tk.LEFT)
         ttk.Entry(self._custom_frame, textvariable=self.custom_base_var).pack(
-            side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 0))
+            side=tk.LEFT, fill=tk.X, expand=True, padx=(SP_S, 0))
 
         # Buttons row
         btn_row = ttk.Frame(self)
-        btn_row.pack(fill=tk.X, padx=8, pady=(0, 4))
+        btn_row.pack(fill=tk.X, pady=(SP_XS, SP_XS))
 
-        self._show_btn = ttk.Button(btn_row, text="Show", style="Secondary.TButton",
-                                     command=self._toggle_show, width=6)
-        self._show_btn.pack(side=tk.LEFT, padx=(0, 4))
+        self._show_btn = ttk.Button(btn_row, text="Show keys", style="Small.TButton",
+                                     command=self._toggle_show)
+        self._show_btn.pack(side=tk.LEFT, padx=(0, SP_XS))
 
-        self._test_btn = ttk.Button(btn_row, text="Test Keys", style="Secondary.TButton",
+        self._test_btn = ttk.Button(btn_row, text="Test keys", style="Small.TButton",
                                      command=self._test_keys)
-        self._test_btn.pack(side=tk.LEFT, padx=(0, 4))
+        self._test_btn.pack(side=tk.LEFT, padx=(0, SP_XS))
 
         # Test status on its own full-width row so long results wrap instead
         # of being clipped next to the buttons
-        self._status_label = ttk.Label(self, text="", style="Dim.TLabel",
-                                        wraplength=330, justify=tk.LEFT)
-        self._status_label.pack(fill=tk.X, padx=8, pady=(0, 8), anchor=tk.W)
+        self._status_label = WrappingLabel(self, text="", style="Dim.TLabel", justify=tk.LEFT)
+        self._status_label.pack(fill=tk.X, pady=(0, SP_S), anchor=tk.W)
+
+        where = self.config_manager.path if self.config_manager else "scrivox_config.json"
+        self._storage_note = WrappingLabel(
+            self, text=f"Keys are saved on this computer in {where}. "
+                       "Keys in a .env file next to Scrivox also work.",
+            style="Dim.TLabel", justify=tk.LEFT)
+        self._storage_note.pack(fill=tk.X, pady=(SP_S, 0))
 
         self._on_provider_change()
 
     _KEY_HINTS = {
-        "OpenRouter": "Key required - openrouter.ai/keys",
-        "OpenAI": "Key required - platform.openai.com",
-        "Anthropic": "Anthropic key required - console.anthropic.com/settings/keys",
-        "Ollama (local)": "Local server - no API key needed",
-        "Custom": "Key required unless the base URL is local",
+        "OpenRouter": "Get a key at openrouter.ai/keys (one key, many models).",
+        "OpenAI": "Get a key at platform.openai.com/api-keys.",
+        "Anthropic": "Get a key at console.anthropic.com/settings/keys.",
+        "Ollama (local)": "Runs on this computer. No key needed; Ollama must be running.",
+        "Custom": "Any OpenAI-compatible server. A key is needed unless the URL is local.",
     }
 
     def _on_provider_change(self, event=None):
@@ -109,24 +126,24 @@ class ApiFrame(ttk.LabelFrame):
         # Show/hide Anthropic key vs standard API key
         if provider == "Anthropic":
             self._api_key_frame.pack_forget()
-            self._anthropic_key_frame.pack(fill=tk.X, padx=8, pady=(0, 4),
+            self._anthropic_key_frame.pack(fill=tk.X, pady=(0, SP_XS),
                                             before=self._show_btn.master)
             self._custom_frame.pack_forget()
         else:
             self._anthropic_key_frame.pack_forget()
-            self._api_key_frame.pack(fill=tk.X, padx=8, pady=(0, 4),
+            self._api_key_frame.pack(fill=tk.X, pady=(0, SP_XS),
                                       before=self._show_btn.master)
             if provider == "Custom":
-                self._custom_frame.pack(fill=tk.X, padx=8, pady=(0, 4),
+                self._custom_frame.pack(fill=tk.X, pady=(0, SP_XS),
                                          before=self._show_btn.master)
             else:
                 self._custom_frame.pack_forget()
 
         # Per-provider key hint, always just above the buttons
         self._key_hint.configure(
-            text=self._KEY_HINTS.get(provider, "API key may be required"))
+            text=self._KEY_HINTS.get(provider, "An API key may be required."))
         self._key_hint.pack_forget()
-        self._key_hint.pack(padx=8, pady=(0, 4), anchor=tk.W,
+        self._key_hint.pack(fill=tk.X, pady=(0, SP_XS), anchor=tk.W,
                             before=self._show_btn.master)
 
     def _load_from_config(self):
@@ -156,15 +173,15 @@ class ApiFrame(ttk.LabelFrame):
 
     def _toggle_show(self):
         self._show_keys = not self._show_keys
-        show_char = "" if self._show_keys else "*"
+        show_char = "" if self._show_keys else "\u2022"
         self._hf_entry.configure(show=show_char)
         self._or_entry.configure(show=show_char)
         self._anthropic_entry.configure(show=show_char)
-        self._show_btn.configure(text="Hide" if self._show_keys else "Show")
+        self._show_btn.configure(text="Hide keys" if self._show_keys else "Show keys")
 
     def _test_keys(self):
         """Test API keys in a background thread."""
-        self._status_label.configure(text="Testing...", style="Dim.TLabel")
+        self._status_label.configure(text="Testing\u2026", style="Dim.TLabel")
         self._test_btn.configure(state=tk.DISABLED)
 
         # Read Tk variables on the main thread before the worker starts
@@ -263,7 +280,7 @@ class ApiFrame(ttk.LabelFrame):
             except Exception as e:
                 status_text, all_ok = f"Test failed: {type(e).__name__}", False
             try:
-                self.after(0, lambda: self._update_test_status(status_text, all_ok))
+                call_in_ui(self, self._update_test_status, status_text, all_ok)
             except Exception:
                 pass  # window destroyed
 
@@ -286,6 +303,14 @@ class ApiFrame(ttk.LabelFrame):
             )
             self.config_manager.set("api", "provider", self.provider_var.get())
             self.config_manager.set("api", "custom_base", self.custom_base_var.get().strip())
+
+    def first_empty_field(self):
+        """The key field a user most likely came here to fill in."""
+        if not self.hf_token_var.get().strip() and not self._has_bundled:
+            return self._hf_entry
+        if self.provider_var.get() == "Anthropic":
+            return self._anthropic_entry
+        return self._or_entry
 
     def get_hf_token(self):
         return self.hf_token_var.get().strip()

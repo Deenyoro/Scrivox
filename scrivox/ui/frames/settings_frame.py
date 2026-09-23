@@ -1,4 +1,6 @@
-"""Model, language, feature toggles, speaker config, and sub-settings with validation."""
+"""Step 2 "Options": model, language, and the optional extras (speakers,
+on-screen content, summary, translation), each with its options shown right
+under its checkbox."""
 
 import tkinter as tk
 from tkinter import ttk
@@ -9,20 +11,25 @@ from ...core.constants import (
     TRANSLATION_LANGUAGES, WHISPER_LANGUAGES, WHISPER_MODELS,
 )
 from ...core.features import has_diarization, has_advanced_features
-from ..theme import COLORS, FONTS
-from ..widgets import AutocompleteCombobox
+from ..output_paths import describe_model
+from ..theme import SP_S, SP_XS, px
+# ToolTip is also imported from here by older modules
+from ..widgets import AutocompleteCombobox, LinkLabel, ToolTip, WrappingLabel
 
-# Build display values for language dropdowns: ["", "Afrikaans (af)", "Arabic (ar)", ...]
-_LANGUAGE_DISPLAY_VALUES = [""] + [f"{name} ({code})" for name, code in WHISPER_LANGUAGES.items()]
+AUTO_DETECT = "Auto-detect"
+
+# Display values for the language dropdown: ["Auto-detect", "Afrikaans (af)", ...]
+_LANGUAGE_DISPLAY_VALUES = [AUTO_DETECT] + [f"{name} ({code})" for name, code in WHISPER_LANGUAGES.items()]
 
 
 def _extract_language_code(display_str):
     """Extract language code from display string like 'Arabic (ar)' -> 'ar'.
 
-    Also accepts raw codes like 'ar' or 'en' directly.
+    Also accepts raw codes like 'ar' or 'en' directly. Blank and
+    "Auto-detect" both mean auto-detection ("").
     """
     display_str = display_str.strip()
-    if not display_str:
+    if not display_str or display_str.lower() == AUTO_DETECT.lower():
         return ""
     # Try to extract from "Name (code)" format
     if "(" in display_str and display_str.endswith(")"):
@@ -32,62 +39,24 @@ def _extract_language_code(display_str):
     return display_str
 
 
-class ToolTip:
-    """Simple tooltip that appears on hover, after a short delay."""
-
-    DELAY_MS = 500
-
-    def __init__(self, widget, text):
-        self._widget = widget
-        self._text = text
-        self._tipwindow = None
-        self._after_id = None
-        widget.bind("<Enter>", self._schedule)
-        widget.bind("<Leave>", self._hide)
-
-    def _schedule(self, event=None):
-        self._unschedule()
-        self._after_id = self._widget.after(self.DELAY_MS, self._show)
-
-    def _unschedule(self):
-        if self._after_id:
-            try:
-                self._widget.after_cancel(self._after_id)
-            except Exception:
-                pass
-            self._after_id = None
-
-    def _show(self, event=None):
-        self._after_id = None
-        if self._tipwindow:
-            return
-        x = self._widget.winfo_rootx() + 20
-        y = self._widget.winfo_rooty() + self._widget.winfo_height() + 4
-        self._tipwindow = tw = tk.Toplevel(self._widget)
-        tw.wm_overrideredirect(True)
-        tw.wm_geometry(f"+{x}+{y}")
-        label = tk.Label(tw, text=self._text, justify=tk.LEFT,
-                         bg=COLORS["bg_secondary"], fg=COLORS["fg"],
-                         font=FONTS["small"], relief=tk.SOLID, borderwidth=1,
-                         padx=6, pady=4)
-        label.pack()
-
-    def _hide(self, event=None):
-        self._unschedule()
-        if self._tipwindow:
-            self._tipwindow.destroy()
-            self._tipwindow = None
+def _field_row(parent, label, pady=(0, SP_XS)):
+    """A label + control row. Returns the frame to put the control in."""
+    row = ttk.Frame(parent)
+    row.pack(fill=tk.X, pady=pady)
+    ttk.Label(row, text=label).pack(side=tk.LEFT)
+    return row
 
 
 class SettingsFrame(ttk.Frame):
-    """Model/language combos, feature checkboxes, and sub-settings."""
+    """Model/language combos, extras checkboxes, and their inline options."""
 
-    def __init__(self, parent, **kwargs):
+    def __init__(self, parent, on_setup_keys=None, **kwargs):
         super().__init__(parent, **kwargs)
+        self._on_setup_keys = on_setup_keys or (lambda tab=None: None)
 
-        # ── Variables ──
+        # ── Variables (names and meanings unchanged; persisted in config) ──
         self.model_var = tk.StringVar(value="large-v3")
-        self.language_var = tk.StringVar(value="")
+        self.language_var = tk.StringVar(value=AUTO_DETECT)
         self.diarize_var = tk.BooleanVar(value=False)
         self.vision_var = tk.BooleanVar(value=False)
         self.summarize_var = tk.BooleanVar(value=False)
@@ -114,256 +83,335 @@ class SettingsFrame(ttk.Frame):
         self.translate_to_var = tk.StringVar(value="")
         self.translation_model_var = tk.StringVar(value=DEFAULT_TRANSLATION_MODEL)
 
+        self._key_links = {}
         self._build()
 
+    # ── Layout ──
+
     def _build(self):
-        # ── MODEL & LANGUAGE ──
-        model_frame = ttk.LabelFrame(self, text="MODEL & LANGUAGE")
-        model_frame.pack(fill=tk.X, padx=4, pady=(0, 6))
+        # Transcription basics
+        row = _field_row(self, "Model")
+        self._model_combo = AutocompleteCombobox(row, textvariable=self.model_var,
+                                                 values=WHISPER_MODELS, state="normal", width=16)
+        self._model_combo.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(SP_S, 0))
+        ToolTip(self._model_combo, "Bigger models are more accurate but slower.\n"
+                                   "large-v3-turbo is a good everyday choice.\n"
+                                   "You can also type a custom model name or folder.")
+        self._model_hint = WrappingLabel(self, text="", style="Dim.TLabel", justify=tk.LEFT)
+        self._model_hint.pack(fill=tk.X, pady=(0, SP_S))
+        self.model_var.trace_add("write", lambda *a: self._update_model_hint())
+        self._update_model_hint()
 
-        row1 = ttk.Frame(model_frame)
-        row1.pack(fill=tk.X, padx=8, pady=(8, 4))
-        ttk.Label(row1, text="Model:").pack(side=tk.LEFT)
-        model_combo = AutocompleteCombobox(row1, textvariable=self.model_var,
-                                          values=WHISPER_MODELS, state="normal", width=16)
-        model_combo.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
-        ToolTip(model_combo, "tiny/base: fast, lower quality\n"
-                             "small/medium: balanced\n"
-                             "large-v3: best quality, slower\n"
-                             "Or enter a custom model name/path")
+        row = _field_row(self, "Language", pady=(0, SP_S))
+        self._lang_combo = AutocompleteCombobox(row, textvariable=self.language_var,
+                                                values=_LANGUAGE_DISPLAY_VALUES, state="normal",
+                                                width=20)
+        self._lang_combo.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(SP_S, 0))
+        ToolTip(self._lang_combo, "Auto-detect works for most recordings.\n"
+                                  "Pick the language (or type a code like 'en')\n"
+                                  "if detection guesses wrong.")
+        self._lang_combo.bind("<FocusOut>", self._normalize_language, add="+")
 
-        row2 = ttk.Frame(model_frame)
-        row2.pack(fill=tk.X, padx=8, pady=(0, 8))
-        ttk.Label(row2, text="Language:").pack(side=tk.LEFT)
-        lang_combo = AutocompleteCombobox(row2, textvariable=self.language_var,
-                                         values=_LANGUAGE_DISPLAY_VALUES, state="normal", width=20)
-        lang_combo.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
-        ToolTip(lang_combo, "Leave blank for auto-detect\n"
-                            "Select from list or type a language code")
+        # ── Extras ──
+        ttk.Separator(self, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(SP_XS, SP_S))
+        ttk.Label(self, text="Extras", style="Header.TLabel").pack(anchor=tk.W, pady=(0, SP_XS))
 
-        ttk.Label(model_frame, text="Blank = auto-detect. Custom model names and language codes accepted.",
-                  style="Dim.TLabel").pack(padx=8, pady=(0, 6), anchor=tk.W)
+        self._extras = ttk.Frame(self)
+        self._extras.pack(fill=tk.X)
 
-        # ── FEATURES ──
-        features_frame = ttk.LabelFrame(self, text="FEATURES")
-        features_frame.pack(fill=tk.X, padx=4, pady=(0, 6))
-
+        self._diarize_cb = self._vision_cb = self._summary_cb = self._translate_cb = None
         if has_diarization():
-            cb = ttk.Checkbutton(features_frame, text="Diarize (speaker labels)",
-                                 variable=self.diarize_var,
-                                 command=self._toggle_diarize)
-            cb.pack(padx=8, pady=(8, 2), anchor=tk.W)
-            ToolTip(cb, "Identify and label different speakers\nRequires HuggingFace token")
+            self._diarize_cb = ttk.Checkbutton(self._extras, text="Identify speakers",
+                                               variable=self.diarize_var,
+                                               command=self._toggle_diarize)
+            self._diarize_cb.pack(anchor=tk.W, pady=px(2))
+            ToolTip(self._diarize_cb, "Label who said what (Speaker 1, Speaker 2, ...).\n"
+                                      "Uses a free Hugging Face token.")
+        self._diarize_frame = self._build_diarize_options()
 
         if has_advanced_features():
-            cb_vision = ttk.Checkbutton(features_frame, text="Vision (keyframe analysis)",
-                                        variable=self.vision_var,
-                                        command=self._toggle_vision)
-            cb_vision.pack(padx=8, pady=2, anchor=tk.W)
-            ToolTip(cb_vision, "Extract and analyze keyframes from video\nRequires LLM API key")
+            self._vision_cb = ttk.Checkbutton(self._extras,
+                                              text="Describe on-screen content (video)",
+                                              variable=self.vision_var,
+                                              command=self._toggle_vision)
+            self._vision_cb.pack(anchor=tk.W, pady=px(2))
+            ToolTip(self._vision_cb, "Capture frames from the video and describe slides,\n"
+                                     "screens and scenes with an AI service.")
+        self._vision_frame = self._build_vision_options()
 
-            cb_summary = ttk.Checkbutton(features_frame, text="Summarize (meeting summary)",
-                                         variable=self.summarize_var,
-                                         command=self._toggle_summary)
-            cb_summary.pack(padx=8, pady=2, anchor=tk.W)
-            ToolTip(cb_summary, "Generate meeting summary with key points\nRequires LLM API key")
+        if has_advanced_features():
+            self._summary_cb = ttk.Checkbutton(self._extras, text="Summarize",
+                                               variable=self.summarize_var,
+                                               command=self._toggle_summary)
+            self._summary_cb.pack(anchor=tk.W, pady=px(2))
+            ToolTip(self._summary_cb, "Add a meeting summary with key points and\n"
+                                      "action items, written by an AI service.")
+        self._summary_frame = self._build_summary_options()
 
-            cb_translate = ttk.Checkbutton(features_frame, text="Translate (LLM translation)",
-                                            variable=self.translate_var,
-                                            command=self._toggle_translate)
-            cb_translate.pack(padx=8, pady=(2, 8), anchor=tk.W)
-            ToolTip(cb_translate, "Translate transcript to one or more languages\n"
-                                  "Produces additional output files\nRequires LLM API key")
+        if has_advanced_features():
+            self._translate_cb = ttk.Checkbutton(self._extras, text="Translate",
+                                                 variable=self.translate_var,
+                                                 command=self._toggle_translate)
+            self._translate_cb.pack(anchor=tk.W, pady=px(2))
+            ToolTip(self._translate_cb, "Also save a translated copy in one or more\n"
+                                        "languages, using an AI service.")
+        self._translate_frame = self._build_translate_options()
 
         if not has_diarization():
-            ttk.Label(features_frame,
-                      text="Upgrade to Regular or Full build for diarization,\nvision, and summary features",
-                      style="Dim.TLabel").pack(padx=8, pady=(8, 8), anchor=tk.W)
-
-        # ── DIARIZATION SUB-SETTINGS ──
-        self._diarize_frame = ttk.LabelFrame(self, text="DIARIZATION")
-        # Initially hidden; shown when diarize is checked
-
-        # Speaker mode radio buttons
-        mode_frame = ttk.Frame(self._diarize_frame)
-        mode_frame.pack(fill=tk.X, padx=8, pady=(8, 4))
-        ttk.Radiobutton(mode_frame, text="Range", variable=self._speaker_mode_var,
-                        value="range", command=self._update_speaker_mode).pack(side=tk.LEFT)
-        ttk.Radiobutton(mode_frame, text="Exact count", variable=self._speaker_mode_var,
-                        value="exact", command=self._update_speaker_mode).pack(side=tk.LEFT, padx=(12, 0))
-
-        # Range row
-        self._range_frame = ttk.Frame(self._diarize_frame)
-        self._range_frame.pack(fill=tk.X, padx=8, pady=2)
-        ttk.Label(self._range_frame, text="Range:").pack(side=tk.LEFT)
-        self._min_entry = ttk.Entry(self._range_frame, textvariable=self.min_speakers_var, width=4)
-        self._min_entry.pack(side=tk.LEFT, padx=(8, 4))
-        ttk.Label(self._range_frame, text="to", style="Dim.TLabel").pack(side=tk.LEFT)
-        self._max_entry = ttk.Entry(self._range_frame, textvariable=self.max_speakers_var, width=4)
-        self._max_entry.pack(side=tk.LEFT, padx=(4, 0))
-
-        # Exact count row
-        self._exact_frame = ttk.Frame(self._diarize_frame)
-        ttk.Label(self._exact_frame, text="Speakers:").pack(side=tk.LEFT)
-        self._num_entry = ttk.Entry(self._exact_frame, textvariable=self.num_speakers_var, width=6)
-        self._num_entry.pack(side=tk.LEFT, padx=(8, 0))
-
-        # Validation label
-        self._diarize_validation = ttk.Label(self._diarize_frame, text="", style="Error.TLabel")
-        self._diarize_validation.pack(padx=8, pady=(0, 2), anchor=tk.W)
-
-        # Speaker names
-        row = ttk.Frame(self._diarize_frame)
-        row.pack(fill=tk.X, padx=8, pady=(2, 8))
-        ttk.Label(row, text="Names:").pack(side=tk.LEFT)
-        names_entry = ttk.Entry(row, textvariable=self.speaker_names_var)
-        names_entry.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
-        ToolTip(names_entry, "Comma-separated speaker names\ne.g. Alice,Bob,Charlie")
-        ttk.Label(self._diarize_frame, text="Comma-separated: Alice,Bob,Charlie",
-                  style="Dim.TLabel").pack(padx=8, pady=(0, 6), anchor=tk.W)
-
-        # Add validation traces
-        self.min_speakers_var.trace_add("write", self._validate_speakers)
-        self.max_speakers_var.trace_add("write", self._validate_speakers)
-        self.num_speakers_var.trace_add("write", self._validate_speakers)
-
-        # ── VISION SUB-SETTINGS ──
-        self._vision_frame = ttk.LabelFrame(self, text="VISION")
-
-        row = ttk.Frame(self._vision_frame)
-        row.pack(fill=tk.X, padx=8, pady=(8, 4))
-        ttk.Label(row, text="Interval (s):").pack(side=tk.LEFT)
-        interval_entry = ttk.Entry(row, textvariable=self.vision_interval_var, width=6)
-        interval_entry.pack(side=tk.RIGHT)
-        ToolTip(interval_entry, "Seconds between keyframe captures\n"
-                                "Fractional values allowed (e.g. 0.5)\n"
-                                "Lower = more detail, higher API cost")
-
-        row = ttk.Frame(self._vision_frame)
-        row.pack(fill=tk.X, padx=8, pady=2)
-        ttk.Label(row, text="Model:").pack(side=tk.LEFT)
-        AutocompleteCombobox(row, textvariable=self.vision_model_var,
-                             values=VISION_MODEL_PRESETS, state="normal").pack(
-            side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
-
-        row = ttk.Frame(self._vision_frame)
-        row.pack(fill=tk.X, padx=8, pady=(2, 4))
-        ttk.Label(row, text="Workers:").pack(side=tk.LEFT)
-        workers_entry = ttk.Entry(row, textvariable=self.vision_workers_var, width=6)
-        workers_entry.pack(side=tk.RIGHT)
-        ToolTip(workers_entry, "Number of concurrent API requests\nHigher = faster, more API load")
-
-        row = ttk.Frame(self._vision_frame)
-        row.pack(fill=tk.X, padx=8, pady=(2, 4))
-        ttk.Label(row, text="Skip similar frames:").pack(side=tk.LEFT)
-        change_entry = ttk.Entry(row, textvariable=self.vision_change_threshold_var, width=6)
-        change_entry.pack(side=tk.RIGHT)
-        ToolTip(change_entry, "Skip near-duplicate frames whose dhash differs\n"
-                              "by <= N bits (out of 64). 0 = disabled.\n"
-                              "Typical: 2 conservative, 5 aggressive")
-
-        # Vision validation
-        self._vision_validation = ttk.Label(self._vision_frame, text="", style="Error.TLabel")
-        self._vision_validation.pack(padx=8, pady=(0, 6), anchor=tk.W)
-
-        self.vision_interval_var.trace_add("write", self._validate_vision)
-        self.vision_workers_var.trace_add("write", self._validate_vision)
-        self.vision_change_threshold_var.trace_add("write", self._validate_vision)
-
-        # ── SUMMARY SUB-SETTINGS ──
-        self._summary_frame = ttk.LabelFrame(self, text="SUMMARY")
-
-        row = ttk.Frame(self._summary_frame)
-        row.pack(fill=tk.X, padx=8, pady=(8, 8))
-        ttk.Label(row, text="Model:").pack(side=tk.LEFT)
-        AutocompleteCombobox(row, textvariable=self.summary_model_var,
-                             values=LLM_MODEL_PRESETS, state="normal").pack(
-            side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
-
-        # ── TRANSLATION SUB-SETTINGS ──
-        self._translate_frame = ttk.LabelFrame(self, text="TRANSLATION")
-
-        row = ttk.Frame(self._translate_frame)
-        row.pack(fill=tk.X, padx=8, pady=(8, 4))
-        ttk.Label(row, text="Target:").pack(side=tk.LEFT)
-        # Exclude blank entry for target — must pick a language
-        translate_langs = [f"{name} ({code})" for name, code in TRANSLATION_LANGUAGES.items()]
-        self._translate_to_combo = AutocompleteCombobox(
-            row, textvariable=self.translate_to_var,
-            values=translate_langs, state="normal", width=20, multi_value=True)
-        self._translate_to_combo.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
-        ToolTip(self._translate_to_combo, "Target language for translation\n"
-                                         "Comma-separated for multiple:\n"
-                                         "e.g. Arabic (ar), French (fr)")
-
-        cb_all = ttk.Checkbutton(self._translate_frame,
-                                  text="Translate all content",
-                                  variable=self.translate_all_var)
-        cb_all.pack(padx=8, pady=(2, 4), anchor=tk.W)
-        ToolTip(cb_all, "Also translate summary, vision descriptions,\n"
-                        "and document headers (not just transcript)")
-
-        row = ttk.Frame(self._translate_frame)
-        row.pack(fill=tk.X, padx=8, pady=(2, 4))
-        ttk.Label(row, text="Model:").pack(side=tk.LEFT)
-        AutocompleteCombobox(row, textvariable=self.translation_model_var,
-                             values=LLM_MODEL_PRESETS, state="normal").pack(
-            side=tk.RIGHT, fill=tk.X, expand=True, padx=(8, 0))
-
-        ttk.Label(self._translate_frame,
-                  text="Produces additional output files per target language",
-                  style="Dim.TLabel").pack(padx=8, pady=(0, 6), anchor=tk.W)
+            WrappingLabel(self._extras,
+                          text="Speaker labels, summaries, translation and on-screen "
+                               "descriptions are in the Regular and Full downloads.",
+                          style="Dim.TLabel", justify=tk.LEFT).pack(fill=tk.X, pady=(0, SP_XS))
 
         # Initialize speaker mode display
         self._update_speaker_mode()
 
+    def _sub_frame(self):
+        """Indented options block that appears under its checkbox."""
+        return ttk.Frame(self._extras, padding=(px(26), 0, 0, px(6)))
+
+    def _key_link(self, parent, key, text, tab):
+        row = ttk.Frame(parent)
+        ttk.Label(row, text=text, style="Warning.TLabel").pack(side=tk.LEFT)
+        LinkLabel(row, text="Set up…", command=lambda: self._on_setup_keys(tab)).pack(
+            side=tk.LEFT, padx=(SP_XS, 0))
+        self._key_links[key] = row
+        return row
+
+    def _build_diarize_options(self):
+        frame = self._sub_frame()
+        self._key_link(frame, "hf", "Needs a Hugging Face token.", "keys")
+
+        mode = ttk.Frame(frame)
+        mode.pack(fill=tk.X, pady=(0, SP_XS))
+        self._mode_frame = mode
+        ttk.Label(mode, text="Speakers").pack(side=tk.LEFT, padx=(0, SP_S))
+        ttk.Radiobutton(mode, text="Detect", variable=self._speaker_mode_var,
+                        value="range", command=self._update_speaker_mode).pack(side=tk.LEFT)
+        ttk.Radiobutton(mode, text="Exactly", variable=self._speaker_mode_var,
+                        value="exact", command=self._update_speaker_mode).pack(
+            side=tk.LEFT, padx=(SP_S, 0))
+        self._num_entry = ttk.Spinbox(mode, textvariable=self.num_speakers_var,
+                                      from_=1, to=50, width=4)
+
+        self._range_frame = ttk.Frame(frame)
+        ttk.Label(self._range_frame, text="Between", style="Dim.TLabel").pack(side=tk.LEFT)
+        self._min_entry = ttk.Spinbox(self._range_frame, textvariable=self.min_speakers_var,
+                                      from_=1, to=50, width=4)
+        self._min_entry.pack(side=tk.LEFT, padx=(SP_XS, SP_XS))
+        ttk.Label(self._range_frame, text="and", style="Dim.TLabel").pack(side=tk.LEFT)
+        self._max_entry = ttk.Spinbox(self._range_frame, textvariable=self.max_speakers_var,
+                                      from_=1, to=50, width=4)
+        self._max_entry.pack(side=tk.LEFT, padx=(SP_XS, SP_XS))
+        ttk.Label(self._range_frame, text="(optional)", style="Dim.TLabel").pack(side=tk.LEFT)
+        self._exact_frame = ttk.Frame(frame)  # kept for layout compatibility
+
+        self._diarize_validation = WrappingLabel(frame, text="", style="SmallError.TLabel",
+                                                 justify=tk.LEFT)
+
+        row = ttk.Frame(frame)
+        row.pack(fill=tk.X, pady=(SP_XS, 0))
+        self._names_row = row
+        ttk.Label(row, text="Names").pack(side=tk.LEFT)
+        names_entry = ttk.Entry(row, textvariable=self.speaker_names_var)
+        names_entry.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(SP_S, 0))
+        ToolTip(names_entry, "Optional. Replace Speaker 1, Speaker 2... with names,\n"
+                             "in order of first appearance: Alice, Bob, Charlie")
+
+        for var in (self.min_speakers_var, self.max_speakers_var, self.num_speakers_var):
+            var.trace_add("write", self._validate_speakers)
+        return frame
+
+    def _build_vision_options(self):
+        frame = self._sub_frame()
+        self._key_link(frame, "llm_vision", "Needs an AI service key.", "keys")
+
+        row = _field_row(frame, "Capture a frame every")
+        ttk.Label(row, text="seconds", style="Dim.TLabel").pack(side=tk.RIGHT)
+        interval_entry = ttk.Spinbox(row, textvariable=self.vision_interval_var,
+                                     from_=0.5, to=3600, increment=5, width=6)
+        interval_entry.pack(side=tk.RIGHT, padx=(SP_S, SP_XS))
+        self._interval_entry = interval_entry
+        ToolTip(interval_entry, "Lower = more detail and higher AI cost.\n"
+                                "Fractions are allowed (e.g. 0.5).")
+
+        row = _field_row(frame, "AI model")
+        AutocompleteCombobox(row, textvariable=self.vision_model_var,
+                             values=VISION_MODEL_PRESETS, state="normal").pack(
+            side=tk.RIGHT, fill=tk.X, expand=True, padx=(SP_S, 0))
+
+        row = _field_row(frame, "Parallel requests")
+        workers_entry = ttk.Spinbox(row, textvariable=self.vision_workers_var,
+                                    from_=1, to=32, width=6)
+        workers_entry.pack(side=tk.RIGHT)
+        self._workers_entry = workers_entry
+        ToolTip(workers_entry, "How many frames are described at once.\n"
+                               "Higher is faster but may hit the service's rate limit.")
+
+        row = _field_row(frame, "Skip near-duplicate frames")
+        change_entry = ttk.Spinbox(row, textvariable=self.vision_change_threshold_var,
+                                   from_=0, to=64, width=6)
+        change_entry.pack(side=tk.RIGHT)
+        self._change_entry = change_entry
+        ToolTip(change_entry, "0 = off. 2 skips only near-identical frames,\n"
+                              "5 skips more aggressively (range 0-64).")
+
+        self._vision_validation = WrappingLabel(frame, text="", style="SmallError.TLabel",
+                                                justify=tk.LEFT)
+
+        for var in (self.vision_interval_var, self.vision_workers_var,
+                    self.vision_change_threshold_var):
+            var.trace_add("write", self._validate_vision)
+        return frame
+
+    def _build_summary_options(self):
+        frame = self._sub_frame()
+        self._key_link(frame, "llm_summary", "Needs an AI service key.", "keys")
+        row = _field_row(frame, "AI model", pady=0)
+        AutocompleteCombobox(row, textvariable=self.summary_model_var,
+                             values=LLM_MODEL_PRESETS, state="normal").pack(
+            side=tk.RIGHT, fill=tk.X, expand=True, padx=(SP_S, 0))
+        return frame
+
+    def _build_translate_options(self):
+        frame = self._sub_frame()
+        self._key_link(frame, "llm_translate", "Needs an AI service key.", "keys")
+
+        row = _field_row(frame, "Translate to")
+        translate_langs = [f"{name} ({code})" for name, code in TRANSLATION_LANGUAGES.items()]
+        self._translate_to_combo = AutocompleteCombobox(
+            row, textvariable=self.translate_to_var,
+            values=translate_langs, state="normal", width=20, multi_value=True)
+        self._translate_to_combo.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(SP_S, 0))
+        ToolTip(self._translate_to_combo, "One or more languages, separated by commas:\n"
+                                          "Arabic (ar), French (fr)")
+
+        cb_all = ttk.Checkbutton(frame, text="Also translate summary and headings",
+                                 variable=self.translate_all_var)
+        cb_all.pack(anchor=tk.W, pady=(0, SP_XS))
+        ToolTip(cb_all, "Translate the summary, on-screen descriptions and\n"
+                        "document headings too, not just the transcript")
+
+        row = _field_row(frame, "AI model")
+        AutocompleteCombobox(row, textvariable=self.translation_model_var,
+                             values=LLM_MODEL_PRESETS, state="normal").pack(
+            side=tk.RIGHT, fill=tk.X, expand=True, padx=(SP_S, 0))
+        WrappingLabel(frame, text="Saves one extra file per language, e.g. talk.fr.srt",
+                      style="Dim.TLabel", justify=tk.LEFT).pack(fill=tk.X)
+        return frame
+
+    # ── Behaviour ──
+
+    def _update_model_hint(self):
+        self._model_hint.configure(text=describe_model(self.model_var.get().strip()))
+
+    def _normalize_language(self, event=None):
+        """Blank means auto-detect: show it as such."""
+        if not self.language_var.get().strip():
+            self.language_var.set(AUTO_DETECT)
+
     def _update_speaker_mode(self):
-        """Show/hide exact vs range speaker controls based on radio selection."""
+        """Show the exact-count box or the optional range, per the radio."""
         if self._speaker_mode_var.get() == "exact":
             self._range_frame.pack_forget()
-            self._exact_frame.pack(fill=tk.X, padx=8, pady=2,
-                                    after=self._diarize_frame.winfo_children()[0])
+            self._num_entry.pack(side=tk.LEFT, padx=(SP_S, 0))
             self.min_speakers_var.set("")
             self.max_speakers_var.set("")
         else:
-            self._exact_frame.pack_forget()
-            self._range_frame.pack(fill=tk.X, padx=8, pady=2,
-                                    after=self._diarize_frame.winfo_children()[0])
+            self._num_entry.pack_forget()
+            self._range_frame.pack(fill=tk.X, pady=(0, SP_XS), after=self._mode_frame)
             self.num_speakers_var.set("")
 
-    def _validate_speakers(self, *args):
-        """Real-time validation of speaker count fields."""
+    def speaker_errors(self):
         errors = []
         num = self._parse_int(self.num_speakers_var.get())
         mins = self._parse_int(self.min_speakers_var.get())
         maxs = self._parse_int(self.max_speakers_var.get())
-
-        if num is not None and num < 1:
-            errors.append("Exact speakers must be >= 1")
-        if mins is not None and mins < 1:
-            errors.append("Min speakers must be >= 1")
-        if maxs is not None and maxs < 1:
-            errors.append("Max speakers must be >= 1")
+        for label, raw, val in (("Speaker count", self.num_speakers_var.get(), num),
+                                ("Minimum speakers", self.min_speakers_var.get(), mins),
+                                ("Maximum speakers", self.max_speakers_var.get(), maxs)):
+            if raw.strip() and val is None:
+                errors.append((f"{label} must be a whole number", label))
+            elif val is not None and val < 1:
+                errors.append((f"{label} must be at least 1", label))
         if mins is not None and maxs is not None and mins > maxs:
-            errors.append("Min speakers cannot exceed max")
+            errors.append(("Minimum speakers can't be more than the maximum", "Minimum speakers"))
+        return errors
 
-        self._diarize_validation.configure(text=errors[0] if errors else "")
+    def _validate_speakers(self, *args):
+        """Real-time validation of speaker count fields."""
+        errors = self.speaker_errors()
+        self._diarize_validation.configure(text=errors[0][0] if errors else "")
+        if errors:
+            self._diarize_validation.pack(fill=tk.X, after=self._range_frame
+                                          if self._range_frame.winfo_manager() else self._mode_frame)
+        else:
+            self._diarize_validation.pack_forget()
+        for entry, label in ((self._num_entry, "Speaker count"),
+                             (self._min_entry, "Minimum speakers"),
+                             (self._max_entry, "Maximum speakers")):
+            bad = any(lbl == label for _, lbl in errors)
+            entry.state(["invalid"] if bad else ["!invalid"])
+
+    def vision_errors(self):
+        errors = []
+        raw_interval = self.vision_interval_var.get()
+        interval = self._parse_float(raw_interval)
+        workers = self._parse_int(self.vision_workers_var.get())
+        threshold = self._parse_int(self.vision_change_threshold_var.get())
+        if (raw_interval.strip() and interval is None) or (interval is not None and interval <= 0):
+            errors.append(("Frame interval must be a number above 0", self._interval_entry))
+        if (self.vision_workers_var.get().strip() and workers is None) or (
+                workers is not None and workers < 1):
+            errors.append(("Parallel requests must be at least 1", self._workers_entry))
+        if (self.vision_change_threshold_var.get().strip() and threshold is None) or (
+                threshold is not None and not 0 <= threshold <= 64):
+            errors.append(("Skip near-duplicates must be between 0 and 64", self._change_entry))
+        return errors
 
     def _validate_vision(self, *args):
         """Real-time validation of vision fields."""
-        errors = []
-        interval = self._parse_float(self.vision_interval_var.get())
-        workers = self._parse_int(self.vision_workers_var.get())
-        threshold = self._parse_int(self.vision_change_threshold_var.get())
+        errors = self.vision_errors()
+        self._vision_validation.configure(text=errors[0][0] if errors else "")
+        if errors and not self._vision_validation.winfo_manager():
+            self._vision_validation.pack(fill=tk.X)
+        elif not errors:
+            self._vision_validation.pack_forget()
+        bad = {id(w) for _, w in errors}
+        for entry in (self._interval_entry, self._workers_entry, self._change_entry):
+            entry.state(["invalid"] if id(entry) in bad else ["!invalid"])
 
-        if interval is not None and interval <= 0:
-            errors.append("Interval must be > 0")
-        if workers is not None and workers < 1:
-            errors.append("Workers must be >= 1")
-        if threshold is not None and not 0 <= threshold <= 64:
-            errors.append("Skip threshold must be 0-64")
+    def set_key_hints(self, missing):
+        """Show "Needs a key - Set up..." under extras whose key is missing.
 
-        self._vision_validation.configure(text=errors[0] if errors else "")
+        `missing` is a set drawn from {"hf", "llm"}.
+        """
+        for key, row in self._key_links.items():
+            need = ("hf" in missing) if key == "hf" else ("llm" in missing)
+            if need and not row.winfo_manager():
+                row.pack(anchor=tk.W, pady=(0, SP_XS), before=row.master.winfo_children()[1]
+                         if len(row.master.winfo_children()) > 1 else None)
+            elif not need and row.winfo_manager():
+                row.pack_forget()
+
+    def problems(self, missing_keys=()):
+        """Everything that would stop a run, as (message, widget_to_focus)."""
+        out = []
+        if self.diarize_var.get():
+            if "hf" in missing_keys:
+                out.append(("Identifying speakers needs a Hugging Face token", "keys"))
+            for msg, label in self.speaker_errors():
+                widget = {"Speaker count": self._num_entry, "Minimum speakers": self._min_entry,
+                          "Maximum speakers": self._max_entry}[label]
+                out.append((msg, widget))
+        uses_llm = self.vision_var.get() or self.summarize_var.get() or self.translate_var.get()
+        if uses_llm and "llm" in missing_keys:
+            out.append(("The selected extras need an AI service key", "keys"))
+        if self.vision_var.get():
+            out.extend(self.vision_errors())
+        if self.translate_var.get() and not self.get_translate_to_codes():
+            out.append(("Choose a language to translate to", self._translate_to_combo))
+        return out
 
     def _parse_int(self, val):
         """Parse string as int, return None if empty or invalid."""
@@ -385,47 +433,31 @@ class SettingsFrame(ttk.Frame):
         except ValueError:
             return None
 
-    def _toggle_diarize(self):
-        if self.diarize_var.get():
-            self._diarize_frame.pack(fill=tk.X, padx=4, pady=(0, 6),
-                                      after=self._find_features_frame())
+    def _show_sub(self, frame, checkbox, visible):
+        if visible and checkbox is not None:
+            frame.pack(fill=tk.X, after=checkbox)
         else:
-            self._diarize_frame.pack_forget()
+            frame.pack_forget()
+
+    def _toggle_diarize(self):
+        self._show_sub(self._diarize_frame, self._diarize_cb, self.diarize_var.get())
+        self.event_generate("<<ExtrasChanged>>")
 
     def _toggle_vision(self):
-        if self.vision_var.get():
-            # Insert after diarize frame if visible, else after features
-            after = self._diarize_frame if self.diarize_var.get() else self._find_features_frame()
-            self._vision_frame.pack(fill=tk.X, padx=4, pady=(0, 6), after=after)
-        else:
-            self._vision_frame.pack_forget()
+        self._show_sub(self._vision_frame, self._vision_cb, self.vision_var.get())
+        self.event_generate("<<ExtrasChanged>>")
 
     def _toggle_summary(self):
-        if self.summarize_var.get():
-            after = self._vision_frame if self.vision_var.get() else (
-                self._diarize_frame if self.diarize_var.get() else self._find_features_frame()
-            )
-            self._summary_frame.pack(fill=tk.X, padx=4, pady=(0, 6), after=after)
-        else:
-            self._summary_frame.pack_forget()
+        self._show_sub(self._summary_frame, self._summary_cb, self.summarize_var.get())
+        self.event_generate("<<ExtrasChanged>>")
 
     def _toggle_translate(self):
-        if self.translate_var.get():
-            # Insert after summary > vision > diarize > features
-            after = self._summary_frame if self.summarize_var.get() else (
-                self._vision_frame if self.vision_var.get() else (
-                    self._diarize_frame if self.diarize_var.get() else self._find_features_frame()
-                ))
-            self._translate_frame.pack(fill=tk.X, padx=4, pady=(0, 6), after=after)
-        else:
-            self._translate_frame.pack_forget()
+        self._show_sub(self._translate_frame, self._translate_cb, self.translate_var.get())
+        self.event_generate("<<ExtrasChanged>>")
 
     def _find_features_frame(self):
-        """Find the FEATURES labelframe widget."""
-        for child in self.winfo_children():
-            if isinstance(child, ttk.LabelFrame) and child.cget("text") == "FEATURES":
-                return child
-        return self
+        """Kept for compatibility: the extras container."""
+        return self._extras
 
     def get_language_code(self):
         """Extract language code from the language combobox display value."""
@@ -486,14 +518,14 @@ class SettingsFrame(ttk.Frame):
         self.model_var.set(settings.get("model", "large-v3"))
 
         # Convert raw language code to display format if needed
-        lang_val = settings.get("language", "")
-        if lang_val and "(" not in lang_val:
+        lang_val = settings.get("language", "") or ""
+        if lang_val and "(" not in lang_val and lang_val.lower() != AUTO_DETECT.lower():
             # Raw code like "en" -> "English (en)"
             from ...core.constants import LANGUAGE_CODE_TO_NAME
             name = LANGUAGE_CODE_TO_NAME.get(lang_val)
             if name:
                 lang_val = f"{name} ({lang_val})"
-        self.language_var.set(lang_val)
+        self.language_var.set(lang_val or AUTO_DETECT)
 
         # Only load advanced feature states if they're available
         if has_diarization():
@@ -529,18 +561,16 @@ class SettingsFrame(ttk.Frame):
             settings.get("translation_model", DEFAULT_TRANSLATION_MODEL))
 
         num = settings.get("num_speakers")
-        self.num_speakers_var.set(str(num) if num else "")
         mins = settings.get("min_speakers")
-        self.min_speakers_var.set(str(mins) if mins else "")
         maxs = settings.get("max_speakers")
-        self.max_speakers_var.set(str(maxs) if maxs else "")
 
-        # Set speaker mode based on loaded values
-        if num:
-            self._speaker_mode_var.set("exact")
-        else:
-            self._speaker_mode_var.set("range")
+        # Set speaker mode based on loaded values (switching mode clears the
+        # other mode's fields, so do it before filling them in)
+        self._speaker_mode_var.set("exact" if num else "range")
         self._update_speaker_mode()
+        self.num_speakers_var.set(str(num) if num else "")
+        self.min_speakers_var.set(str(mins) if mins else "")
+        self.max_speakers_var.set(str(maxs) if maxs else "")
 
         # Show/hide sub-frames
         self._toggle_diarize()
@@ -552,7 +582,9 @@ class SettingsFrame(ttk.Frame):
         """Return current settings as a dict for config persistence."""
         return {
             "model": self.model_var.get(),
-            "language": self.language_var.get(),
+            # "Auto-detect" is display-only; config keeps "" as before
+            "language": "" if not _extract_language_code(self.language_var.get())
+            else self.language_var.get(),
             "diarize": self.diarize_var.get(),
             "vision": self.vision_var.get(),
             "summarize": self.summarize_var.get(),
@@ -570,3 +602,13 @@ class SettingsFrame(ttk.Frame):
             "vision_change_threshold": self._safe_int(self.vision_change_threshold_var.get(), 0),
             "summary_model": self.summary_model_var.get(),
         }
+
+    def all_vars(self):
+        """Every persisted variable (used to auto-save settings on change)."""
+        return [self.model_var, self.language_var, self.diarize_var, self.vision_var,
+                self.summarize_var, self.num_speakers_var, self.min_speakers_var,
+                self.max_speakers_var, self.speaker_names_var, self.vision_interval_var,
+                self.vision_model_var, self.vision_workers_var,
+                self.vision_change_threshold_var, self.summary_model_var,
+                self.translate_var, self.translate_all_var, self.translate_to_var,
+                self.translation_model_var]
