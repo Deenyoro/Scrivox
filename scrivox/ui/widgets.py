@@ -3,6 +3,245 @@
 import tkinter as tk
 from tkinter import ttk
 
+from .theme import COLORS, FONTS, SP_S, px
+
+
+class ToolTip:
+    """Simple tooltip that appears on hover (or keyboard focus) after a delay."""
+
+    DELAY_MS = 500
+
+    def __init__(self, widget, text):
+        self._widget = widget
+        self._text = text
+        self._tipwindow = None
+        self._after_id = None
+        widget.bind("<Enter>", self._schedule, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<ButtonPress>", self._hide, add="+")
+
+    @property
+    def text(self):
+        return self._text
+
+    @text.setter
+    def text(self, value):
+        self._text = value
+
+    def _schedule(self, event=None):
+        self._unschedule()
+        if self._text:
+            self._after_id = self._widget.after(self.DELAY_MS, self._show)
+
+    def _unschedule(self):
+        if self._after_id:
+            try:
+                self._widget.after_cancel(self._after_id)
+            except tk.TclError:
+                pass  # widget already destroyed
+            self._after_id = None
+
+    def _show(self, event=None):
+        self._after_id = None
+        if self._tipwindow or not self._text:
+            return
+        x = self._widget.winfo_rootx() + 20
+        y = self._widget.winfo_rooty() + self._widget.winfo_height() + 4
+        self._tipwindow = tw = tk.Toplevel(self._widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+        label = tk.Label(tw, text=self._text, justify=tk.LEFT,
+                         bg=COLORS["bg_secondary"], fg=COLORS["fg"],
+                         font=FONTS["small"], relief=tk.SOLID, borderwidth=1,
+                         padx=6, pady=4, wraplength=int(360 * _scale(tw)))
+        label.pack()
+
+    def _hide(self, event=None):
+        self._unschedule()
+        if self._tipwindow:
+            self._tipwindow.destroy()
+            self._tipwindow = None
+
+
+def _scale(widget):
+    try:
+        return widget.winfo_fpixels("1i") / 96.0
+    except tk.TclError:
+        return 1.0
+
+
+class TreeRowTooltip:
+    """Tooltip for a Treeview showing a per-row text (e.g. the full path)."""
+
+    def __init__(self, tree, text_for_row):
+        self._tree = tree
+        self._text_for_row = text_for_row
+        self._row = None
+        self._tip = ToolTip(tree, "")
+        tree.bind("<Motion>", self._on_motion, add="+")
+
+    def _on_motion(self, event):
+        row = self._tree.identify_row(event.y)
+        if row == self._row:
+            return
+        self._row = row
+        self._tip._hide()
+        self._tip.text = self._text_for_row(row) if row else ""
+        if self._tip.text:
+            self._tip._schedule()
+
+
+class LinkLabel(ttk.Label):
+    """Clickable text that looks like a hyperlink and is keyboard-reachable."""
+
+    def __init__(self, parent, text, command, **kwargs):
+        kwargs.setdefault("style", "Link.TLabel")
+        super().__init__(parent, text=text, cursor="hand2", takefocus=True, **kwargs)
+        self._command = command
+        self.bind("<Button-1>", lambda e: self._command())
+        self.bind("<Return>", lambda e: self._command())
+        self.bind("<space>", lambda e: self._command())
+        self.bind("<Enter>", lambda e: self.state(["active"]))
+        self.bind("<Leave>", lambda e: self.state(["!active"]))
+
+
+class WrappingLabel(ttk.Label):
+    """Label whose wraplength follows its own width, so hint text wraps
+    instead of being clipped when the column is narrow or the DPI is high."""
+
+    def __init__(self, parent, **kwargs):
+        # A modest starting width so an unwrapped long text never forces its
+        # container (or a dialog) to be very wide before the first layout
+        kwargs.setdefault("wraplength", int(280 * _scale(parent)))
+        super().__init__(parent, **kwargs)
+        self.bind("<Configure>", self._rewrap, add="+")
+
+    def _rewrap(self, event):
+        if event.width > 20:
+            self.configure(wraplength=event.width - 2)
+
+
+class StepCard(ttk.Frame):
+    """A numbered, bordered section: (1) Files, (2) Options, (3) Save to.
+
+    Children go into `.body`.
+    """
+
+    def __init__(self, parent, number, title, subtitle="", **kwargs):
+        super().__init__(parent, style="Card.TFrame", padding=(px(12), px(10)), **kwargs)
+        header = ttk.Frame(self)
+        header.pack(fill=tk.X, pady=(0, SP_S))
+
+        badge_font = FONTS["button_bold"]
+        import tkinter.font as tkfont
+        size = int(tkfont.Font(font=badge_font).metrics("linespace") * 1.25)
+        badge = tk.Canvas(header, width=size, height=size, bg=COLORS["bg"],
+                          highlightthickness=0, borderwidth=0)
+        badge.create_oval(1, 1, size - 1, size - 1, fill=COLORS["accent"], outline="")
+        badge.create_text(size / 2, size / 2, text=str(number),
+                          fill=COLORS["button_fg"], font=badge_font)
+        badge.pack(side=tk.LEFT, padx=(0, SP_S))
+        self.title_label = ttk.Label(header, text=title, style="CardTitle.TLabel")
+        self.title_label.pack(side=tk.LEFT)
+        self.header = header
+        if subtitle:
+            ttk.Label(header, text=subtitle, style="Dim.TLabel").pack(
+                side=tk.LEFT, padx=(SP_S, 0), pady=(px(2), 0))
+
+        self.body = ttk.Frame(self)
+        self.body.pack(fill=tk.BOTH, expand=True)
+
+
+class DropZone(tk.Canvas):
+    """Large dashed "drop files here" area shown while the queue is empty."""
+
+    def __init__(self, parent, on_browse, dnd_available, **kwargs):
+        s = _scale(parent)
+        super().__init__(parent, height=int(132 * s), bg=COLORS["bg"],
+                         highlightthickness=0, borderwidth=0, cursor="hand2",
+                         takefocus=True, **kwargs)
+        self._on_browse = on_browse
+        self._dnd = dnd_available
+        self._hover = False
+        self.bind("<Configure>", lambda e: self._draw())
+        self.bind("<Button-1>", lambda e: self._on_browse())
+        self.bind("<Enter>", lambda e: self._set_hover(True))
+        self.bind("<Leave>", lambda e: self._set_hover(False))
+        self.bind("<Return>", lambda e: self._on_browse())
+        self.bind("<space>", lambda e: self._on_browse())
+        self.bind("<FocusIn>", lambda e: self._draw())
+        self.bind("<FocusOut>", lambda e: self._draw())
+
+    def set_dnd_available(self, available):
+        self._dnd = available
+        self._draw()
+
+    def _set_hover(self, hover):
+        self._hover = hover
+        self._draw()
+
+    def _draw(self):
+        self.delete("all")
+        w, h = self.winfo_width(), self.winfo_height()
+        if w < 10 or h < 10:
+            return
+        s = _scale(self)
+        m = int(2 * s)
+        try:
+            focused = self.focus_get() is self
+        except (KeyError, tk.TclError):
+            focused = False
+        color = COLORS["accent"] if (self._hover or focused) else COLORS["border_strong"]
+        self.create_rectangle(m, m, w - m, h - m, outline=color,
+                              dash=(int(6 * s), int(4 * s)), width=max(1, int(1.5 * s)),
+                              fill=COLORS["bg_secondary"] if self._hover else COLORS["bg"])
+        cx = w / 2
+        # Simple "upload" glyph: arrow into a tray
+        gy = h * 0.30
+        g = 10 * s
+        self.create_line(cx, gy - g, cx, gy + g * 0.6, fill=COLORS["accent"],
+                         width=max(2, int(2 * s)), arrow=tk.LAST,
+                         arrowshape=(int(8 * s), int(9 * s), int(4 * s)))
+        self.create_line(cx - g * 1.2, gy + g * 0.4, cx - g * 1.2, gy + g * 1.1,
+                         cx + g * 1.2, gy + g * 1.1, cx + g * 1.2, gy + g * 0.4,
+                         fill=COLORS["accent"], width=max(2, int(2 * s)))
+        main = ("Drop audio or video files here" if self._dnd
+                else "Click to choose audio or video files")
+        self.create_text(cx, h * 0.62, text=main, fill=COLORS["fg"], font=FONTS["body"])
+        sub = "or click to browse  \u00b7  Ctrl+O" if self._dnd else "Ctrl+O"
+        self.create_text(cx, h * 0.80, text=sub, fill=COLORS["fg_dim"], font=FONTS["small"])
+
+
+def call_in_ui(widget, fn, *args):
+    """Schedule fn(*args) on the Tk thread from a worker thread, through the
+    app's call queue when there is one (ScrivoxApp.call_soon)."""
+    root = widget._root()
+    call_soon = getattr(root, "call_soon", None)
+    if call_soon is not None:
+        call_soon(fn, *args)
+    else:
+        widget.after(0, fn, *args)
+
+
+def set_state_recursive(widget, enabled, skip=()):
+    """Enable/disable every interactive ttk widget under `widget`.
+
+    Uses ttk state flags so a readonly combobox stays readonly when it is
+    re-enabled.
+    """
+    for child in widget.winfo_children():
+        if child in skip:
+            continue
+        if isinstance(child, (ttk.Button, ttk.Checkbutton, ttk.Radiobutton, ttk.Entry,
+                              ttk.Combobox, ttk.Spinbox, ttk.Scale)):
+            try:
+                child.state(["!disabled"] if enabled else ["disabled"])
+            except tk.TclError:
+                pass
+        elif isinstance(child, LinkLabel):
+            child.configure(takefocus=enabled)
+        set_state_recursive(child, enabled, skip)
+
 
 class AutocompleteCombobox(ttk.Combobox):
     """Combobox with type-to-filter autocomplete popup.
@@ -135,7 +374,7 @@ class AutocompleteCombobox(ttk.Combobox):
             highlightthickness=0,
             borderwidth=1,
             relief='solid',
-            font=("Segoe UI", 9),
+            font="TkDefaultFont",
         )
         self._listbox.pack(fill=tk.BOTH, expand=True)
 
@@ -157,8 +396,12 @@ class AutocompleteCombobox(ttk.Combobox):
         y = self.winfo_rooty() + self.winfo_height()
         width = self.winfo_width()
         num_visible = min(len(items), 8)
-        # Estimate item height from font
-        item_height = 20
+        # Row height from the actual font, so the popup fits at any DPI
+        try:
+            import tkinter.font as tkfont
+            item_height = tkfont.nametofont("TkDefaultFont").metrics("linespace") + 2
+        except tk.TclError:
+            item_height = 20
         height = num_visible * item_height + 4
         self._popup.wm_geometry(f"{width}x{height}+{x}+{y}")
 

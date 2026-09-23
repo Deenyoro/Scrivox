@@ -123,6 +123,11 @@ for pkg in metadata_packages:
 # Include .env.example
 extra_datas.append(('.env.example', '.'))
 
+# Window/taskbar icon used at runtime by the GUI (ui/app.py _set_icon)
+for _asset in ('assets/scrivox.ico', 'assets/scrivox.png'):
+    if os.path.isfile(_asset):
+        extra_datas.append((_asset, 'assets'))
+
 # Icon
 icon_file = 'assets/scrivox.ico' if os.path.isfile('assets/scrivox.ico') else None
 
