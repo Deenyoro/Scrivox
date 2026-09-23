@@ -240,6 +240,16 @@ def _wrap_subtitle_text(text, max_line=42):
     return "\n".join(lines)
 
 
+def _escape_vtt(text):
+    """Escape WebVTT cue-text metacharacters.
+
+    In WebVTT cue text "<" opens a tag and "&" a character reference, so an
+    unescaped "x < y" silently drops text in players, and "-->" inside a cue
+    breaks cue parsing. Escape them like the spec requires.
+    """
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def format_output(segments, fmt="txt", diarized=False, visual_context=None,
                   summary=None, metadata=None, subtitle_speakers=False,
                   subtitle_max_chars=84, subtitle_max_duration=4.0,
@@ -388,12 +398,12 @@ def format_output(segments, fmt="txt", diarized=False, visual_context=None,
         for seg in merged:
             start_ts = format_timestamp(seg["start"], "vtt")
             end_ts = format_timestamp(seg["end"], "vtt")
-            text = _wrap_subtitle_text(seg["text"])
+            text = _escape_vtt(_wrap_subtitle_text(seg["text"]))
             seg_lang = seg.get("language", "")
             if seg_lang and seg_lang != primary_lang:
-                text = f"<lang {seg_lang}>{text}</lang>"
+                text = f"<lang {_escape_vtt(seg_lang)}>{text}</lang>"
             if subtitle_speakers and diarized and seg.get("speaker"):
-                text = f"<v {seg['speaker']}>{text}</v>"
+                text = f"<v {_escape_vtt(seg['speaker'])}>{text}</v>"
             lines.append(f"{start_ts} --> {end_ts}")
             lines.append(text)
             lines.append("")

@@ -42,12 +42,36 @@ class SubtitleOutputTests(unittest.TestCase):
         self.assertEqual(out.splitlines()[:3],
                          ["1", "00:00:00,000 --> 00:00:02,300", "Hello there."])
 
+    def test_vtt_escapes_cue_text(self):
+        out = format_output([_seg(0.0, 2.0, "if a < b & c > d")], "vtt")
+        lines = out.splitlines()
+        self.assertEqual(lines[0], "WEBVTT")
+        self.assertIn("if a &lt; b &amp; c &gt; d", lines)
+        self.assertNotIn("if a < b & c > d", out)
+
+    def test_vtt_escapes_arrow_in_text(self):
+        out = format_output([_seg(0.0, 2.0, "go --> there")], "vtt")
+        cue_lines = [ln for ln in out.splitlines() if "-->" in ln]
+        # Only the timing line may contain a literal "-->"
+        self.assertEqual(cue_lines, ["00:00:00.000 --> 00:00:02.000"])
+
+    def test_vtt_escapes_speaker_voice_tag(self):
+        out = format_output(
+            [_seg(0.0, 2.0, "Hi", speaker="A&B <x>")], "vtt",
+            diarized=True, subtitle_speakers=True,
+        )
+        self.assertIn("<v A&amp;B &lt;x&gt;>Hi</v>", out)
+
     def test_vtt_language_tag_kept(self):
         out = format_output(
             [_seg(0.0, 2.0, "Bonjour", language="fr")], "vtt",
             metadata={"detected_language": "en"},
         )
         self.assertIn("<lang fr>Bonjour</lang>", out)
+
+    def test_srt_text_is_not_html_escaped(self):
+        out = format_output([_seg(0.0, 2.0, "R&D")], "srt")
+        self.assertIn("R&D", out.splitlines())
 
 
 class OtherFormatTests(unittest.TestCase):
