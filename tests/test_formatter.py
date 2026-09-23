@@ -21,6 +21,12 @@ class FormatTimestampTests(unittest.TestCase):
         self.assertEqual(format_timestamp(1.15), "00:00:01,150")
         self.assertEqual(format_timestamp(1.001), "00:00:01,001")
 
+    def test_exact_half_milliseconds_round_up(self):
+        # 0.0625 ms steps are exact in binary; round() would give ",000"/",002".
+        self.assertEqual(format_timestamp(0.0005), "00:00:00,001")
+        self.assertEqual(format_timestamp(0.0625), "00:00:00,063")
+        self.assertEqual(format_timestamp(0.3125), "00:00:00,313")
+
     def test_rounding_carries_into_seconds_minutes_hours(self):
         self.assertEqual(format_timestamp(59.9996), "00:01:00,000")
         self.assertEqual(format_timestamp(3599.9999), "01:00:00,000")
@@ -68,6 +74,13 @@ class SubtitleOutputTests(unittest.TestCase):
             metadata={"detected_language": "en"},
         )
         self.assertIn("<lang fr>Bonjour</lang>", out)
+
+    def test_vtt_escapes_language_tag_value(self):
+        out = format_output(
+            [_seg(0.0, 2.0, "Hi", language="x&<y>")], "vtt",
+            metadata={"detected_language": "en"},
+        )
+        self.assertIn("<lang x&amp;&lt;y&gt;>Hi</lang>", out)
 
     def test_srt_text_is_not_html_escaped(self):
         out = format_output([_seg(0.0, 2.0, "R&D")], "srt")

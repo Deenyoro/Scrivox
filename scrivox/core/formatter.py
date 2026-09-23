@@ -8,7 +8,8 @@ def format_timestamp(seconds, fmt="srt"):
     """Convert seconds to SRT or VTT timestamp format."""
     # Work in whole milliseconds: truncating the float fraction turns
     # e.g. 2.3 into 2.299999... -> "02,299", shifting cues 1 ms early.
-    total_ms = max(0, round(seconds * 1000))
+    # Round half up (round() would round exact halves to even).
+    total_ms = max(0, int(seconds * 1000 + 0.5))
     h, rem = divmod(total_ms, 3_600_000)
     m, rem = divmod(rem, 60_000)
     s, ms = divmod(rem, 1000)
