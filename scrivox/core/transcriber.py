@@ -325,6 +325,30 @@ def _dir_size(folder):
     return total
 
 
+# Downloads still running in the background, by model name. Cancelling a
+# run only stops *waiting*: huggingface_hub can't be interrupted mid-file, so
+# the download thread carries on. The next run re-attaches to it instead of
+# starting a second, competing download of the same multi-GB model.
+_ACTIVE_DOWNLOADS = {}
+_ACTIVE_LOCK = None
+
+
+def _active_lock():
+    global _ACTIVE_LOCK
+    if _ACTIVE_LOCK is None:
+        import threading
+        _ACTIVE_LOCK = threading.Lock()
+    return _ACTIVE_LOCK
+
+
+def download_in_progress(model_name=None):
+    """True if a model download (for `model_name`, or any) is still running."""
+    with _active_lock():
+        entries = ([_ACTIVE_DOWNLOADS.get(model_name)] if model_name
+                   else list(_ACTIVE_DOWNLOADS.values()))
+    return any(e is not None and e["thread"].is_alive() for e in entries)
+
+
 def ensure_model_downloaded(model_name, on_download, should_cancel=None):
     """Fetch a stock Whisper model before loading it, reporting progress.
 
@@ -332,7 +356,12 @@ def ensure_model_downloaded(model_name, on_download, should_cancel=None):
     no way to show progress or cancel. Here the download runs on a helper
     thread while this thread reports the bytes received so far through
     `on_download(bytes_done)` twice a second and calls `should_cancel()`,
-    which may raise to abandon the wait. Returns True if a download happened.
+    which may raise to abandon the wait. When the download has finished,
+    `on_download(None)` is called once (the model is about to be loaded).
+    Returns True if a download happened.
+
+    A cancelled wait leaves the download running in the background; calling
+    this again for the same model re-attaches to it rather than starting over.
     Custom folders and already-cached models return False immediately.
     """
     if os.path.isdir(model_name):
@@ -341,51 +370,68 @@ def ensure_model_downloaded(model_name, on_download, should_cancel=None):
         from faster_whisper.utils import download_model
     except ImportError:
         return False
-    cached = True
-    try:
-        download_model(model_name, local_files_only=True)
-    except ValueError:
-        return False  # not a known model name; WhisperModel reports the error
-    except Exception:  # noqa: BLE001 - any lookup failure just means "not cached"
-        cached = False
-    if cached:
-        return False
-
-    repo_id = model_name if "/" in model_name else None
-    if repo_id is None:
-        try:
-            from faster_whisper.utils import _MODELS
-            repo_id = _MODELS.get(model_name)
-        except (ImportError, AttributeError):
-            repo_id = None
-    folder = None
-    if repo_id:
-        try:
-            from huggingface_hub import constants as hf_constants
-            folder = os.path.join(hf_constants.HF_HUB_CACHE,
-                                  "models--" + repo_id.replace("/", "--"))
-        except (ImportError, AttributeError):
-            folder = None
 
     import threading
-    outcome = {}
+    with _active_lock():
+        entry = _ACTIVE_DOWNLOADS.get(model_name)
+        if entry is not None and not entry["thread"].is_alive():
+            _ACTIVE_DOWNLOADS.pop(model_name, None)
+            entry = None
 
-    def _download():
+    if entry is None:
+        cached = True
         try:
-            outcome["path"] = download_model(model_name)
-        except BaseException as e:  # noqa: BLE001 - re-raised on the calling thread
-            outcome["error"] = e
+            download_model(model_name, local_files_only=True)
+        except ValueError:
+            return False  # not a known model name; WhisperModel reports the error
+        except Exception:  # noqa: BLE001 - any lookup failure just means "not cached"
+            cached = False
+        if cached:
+            return False
 
-    worker = threading.Thread(target=_download, daemon=True)
-    worker.start()
-    on_download(0)
+        repo_id = model_name if "/" in model_name else None
+        if repo_id is None:
+            try:
+                from faster_whisper.utils import _MODELS
+                repo_id = _MODELS.get(model_name)
+            except (ImportError, AttributeError):
+                repo_id = None
+        folder = None
+        if repo_id:
+            try:
+                from huggingface_hub import constants as hf_constants
+                folder = os.path.join(hf_constants.HF_HUB_CACHE,
+                                      "models--" + repo_id.replace("/", "--"))
+            except (ImportError, AttributeError):
+                folder = None
+
+        outcome = {}
+
+        def _download():
+            try:
+                outcome["path"] = download_model(model_name)
+            except BaseException as e:  # noqa: BLE001 - re-raised on the calling thread
+                outcome["error"] = e
+
+        entry = {"thread": threading.Thread(target=_download, daemon=True),
+                 "folder": folder, "outcome": outcome}
+        with _active_lock():
+            _ACTIVE_DOWNLOADS[model_name] = entry
+        entry["thread"].start()
+
+    worker, folder, outcome = entry["thread"], entry["folder"], entry["outcome"]
+    on_download(_dir_size(folder) if folder and os.path.isdir(folder) else 0)
     while worker.is_alive():
         worker.join(0.5)
         if should_cancel is not None:
-            should_cancel()
+            should_cancel()  # may raise: the download keeps going for next time
         on_download(_dir_size(folder) if folder and os.path.isdir(folder) else 0)
+    with _active_lock():
+        if _ACTIVE_DOWNLOADS.get(model_name) is entry:
+            _ACTIVE_DOWNLOADS.pop(model_name, None)
     if "error" in outcome:
         raise outcome["error"]
+    on_download(None)
     return True
 
 

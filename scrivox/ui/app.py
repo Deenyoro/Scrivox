@@ -1044,8 +1044,9 @@ class ScrivoxApp(_RootBase):
             self._refresh_readiness()
 
     def _on_overall_progress(self, pct):
-        if self._is_running:
-            self.title(f"{int(pct)}% · {self._base_title}")
+        if self._is_running and not self._download_active:
+            label = f"{int(pct)}%" if pct >= 1 else "Working…"
+            self.title(f"{label} · {self._base_title}")
 
     def _on_progress(self, msg):
         """Thread-safe progress callback: schedules log append on main thread."""
@@ -1065,24 +1066,42 @@ class ScrivoxApp(_RootBase):
     def _on_fraction(self, frac):
         """Thread-safe within-step progress callback."""
         try:
-            self.call_soon(self.progress_frame.set_step_fraction, frac)
+            self.call_soon(self._apply_fraction, frac)
         except (RuntimeError, tk.TclError):
             pass
 
+    def _apply_fraction(self, frac):
+        self._download_active = False  # transcription itself is under way
+        self.progress_frame.set_step_fraction(frac)
+
     def _on_download(self, model, done):
-        """Thread-safe first-run model download progress."""
+        """Thread-safe first-run model download progress (done=None: the
+        download finished and the model is loading)."""
+        try:
+            self.call_soon(self._show_download, model, done)
+        except (RuntimeError, tk.TclError):
+            pass
+
+    def _show_download(self, model, done):
+        if done is None:
+            self._download_active = False
+            self.progress_frame.set_status(
+                "Loading the speech model…", None,
+                f"{model} is downloaded. Getting it ready on the graphics card.")
+            self.title(f"Loading… · {self._base_title}")
+            return
+        self._download_active = True
         total = MODEL_INFO.get(model, (None, None))[1]
         text = "Downloading the speech model (first run only)"
         if total:
             detail = f"{model}: {format_size(done)} of about {format_size(total)}"
             frac = min(done / total, 0.99)
+            self.title(f"Downloading {int(frac * 100)}% · {self._base_title}")
         else:
             detail = f"{model}: {format_size(done)} so far"
             frac = None
-        try:
-            self.call_soon(self.progress_frame.set_status, text, frac, detail)
-        except (RuntimeError, tk.TclError):
-            pass
+            self.title(f"Downloading… · {self._base_title}")
+        self.progress_frame.set_status(text, frac, detail)
 
     def _choose_jobs(self):
         """All jobs, or only the unfinished ones if some are already done."""
@@ -1319,7 +1338,15 @@ class ScrivoxApp(_RootBase):
     def _on_pipeline_cancelled(self, results=None, errors=None, jobs=None):
         """Called on main thread when pipeline is cancelled."""
         self._set_running(False)
-        self.progress_frame.set_cancelled()
+        if self._download_active:
+            # huggingface_hub can't stop mid-file, so say so instead of
+            # pretending the bandwidth/disk use has stopped
+            self.progress_frame.set_cancelled(
+                detail="The speech model keeps downloading in the background, so the "
+                       "next start continues where it left off.")
+            self._download_active = False
+        else:
+            self.progress_frame.set_cancelled()
         self._on_progress("Pipeline cancelled by user.")
         self._pipeline = None
         if results:

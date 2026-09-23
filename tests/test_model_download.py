@@ -68,6 +68,49 @@ class EnsureModelDownloadedTests(unittest.TestCase):
         self.assertLess(time.monotonic() - t0, 3)
         release.set()
 
+    def test_finish_is_signalled_with_none(self):
+        reports = []
+
+        def fake_download(name, local_files_only=False, **kw):
+            if local_files_only:
+                raise OSError("not cached")
+            time.sleep(0.6)
+            return "/cache/model"
+
+        with mock.patch("faster_whisper.utils.download_model", fake_download):
+            transcriber.ensure_model_downloaded("tiny", reports.append)
+        self.assertIsNone(reports[-1])
+        self.assertTrue(all(isinstance(r, int) for r in reports[:-1]))
+
+    def test_restart_after_cancel_reattaches_to_running_download(self):
+        # Cancel only stops waiting; a second Start must not launch a second
+        # concurrent multi-GB download of the same model
+        release = threading.Event()
+        started = []
+
+        def fake_download(name, local_files_only=False, **kw):
+            if local_files_only:
+                raise OSError("not cached")
+            started.append(name)
+            release.wait(10)
+            return "/cache/model"
+
+        cancel = threading.Event()
+
+        def should_cancel():
+            if cancel.is_set():
+                raise _Cancelled()
+
+        with mock.patch("faster_whisper.utils.download_model", fake_download):
+            threading.Timer(0.3, cancel.set).start()
+            with self.assertRaises(_Cancelled):
+                transcriber.ensure_model_downloaded("small", lambda n: None, should_cancel)
+            self.assertTrue(transcriber.download_in_progress("small"))
+            threading.Timer(0.3, release.set).start()
+            self.assertTrue(transcriber.ensure_model_downloaded("small", lambda n: None))
+        self.assertEqual(started, ["small"])
+        self.assertFalse(transcriber.download_in_progress("small"))
+
     def test_unknown_model_name_is_left_to_whisper(self):
         def fake_download(name, local_files_only=False, **kw):
             raise ValueError("Invalid model size")

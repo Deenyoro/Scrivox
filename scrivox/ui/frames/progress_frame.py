@@ -130,9 +130,7 @@ class ProgressFrame(ttk.Frame):
         self._cancelling = False
         self._file_num = 1
         self._total_files = 1
-        if self._file_bar_shown:
-            self._file_row.pack_forget()
-            self._file_bar_shown = False
+        self._hide_file_row()
         self._stop_timer()
 
     def start(self):
@@ -206,22 +204,31 @@ class ProgressFrame(ttk.Frame):
             self._stop_marquee()
             self._progress_bar["value"] = max(0.0, min(fraction, 1.0)) * 100
 
+    def _hide_file_row(self):
+        if self._file_bar_shown:
+            self._file_row.pack_forget()
+            self._file_bar_shown = False
+
     def complete(self, elapsed=None, headline=None, detail=""):
-        """Mark progress as complete."""
+        """Mark progress as complete. The headline carries the duration, so
+        the running timer is cleared (one duration, not two)."""
         self._stop_timer()
         self._stop_marquee()
+        self._hide_file_row()
         self._cancelling = False
+        self._elapsed_text.set("")
         self._progress_bar["value"] = 100
         self._file_bar["value"] = 100
         text = headline or "Done"
-        if elapsed is not None and not headline:
-            text = f"Done in {_fmt_elapsed(elapsed)}"
+        if elapsed is not None:
+            text = f"{text} in {_fmt_elapsed(elapsed)}"
         self._set_headline(text, style="HeadlineSuccess.TLabel", detail=detail)
 
     def set_error(self, message, detail="", fix=None):
         """Show error state; `fix` adds a "How to fix" button."""
         self._stop_timer()
         self._stop_marquee()
+        self._hide_file_row()
         self._cancelling = False
         self._set_headline(message, style="HeadlineError.TLabel",
                            detail=detail or "The log has the technical details.", fix=fix)
@@ -232,13 +239,14 @@ class ProgressFrame(ttk.Frame):
         self._set_headline("Cancelling…",
                            detail="Finishing the current operation, this can take a moment.")
 
-    def set_cancelled(self):
+    def set_cancelled(self, detail=None):
         """Show cancelled state."""
         self._stop_timer()
         self._stop_marquee()
+        self._hide_file_row()
         self._cancelling = False
-        self._set_headline("Cancelled", detail="Nothing more will be processed. "
-                                               "Press Start transcription to try again.")
+        self._set_headline("Cancelled", detail=detail or (
+            "Nothing more will be processed. Press Start transcription to try again."))
 
     def _start_timer(self):
         self._update_elapsed()

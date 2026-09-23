@@ -156,8 +156,9 @@ class TranscriptionPipeline:
             on_fraction: Callback for within-step progress: on_fraction(frac)
                 with frac in 0.0-1.0 (currently reported during transcription)
             on_download: Optional callback(model_name, bytes_done) while a
-                Whisper model is downloaded on first use (GUI progress).
-                When omitted, the model downloads silently as before.
+                Whisper model is downloaded on first use (GUI progress);
+                bytes_done is None once the download has finished and the
+                model is being loaded. When omitted, the model downloads silently as before.
         """
         self.config = config
         self.on_progress = on_progress
