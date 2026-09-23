@@ -33,6 +33,22 @@ Double-click `Scrivox.exe` or run without arguments:
 python main.py
 ```
 
+The window walks you through three steps:
+
+1. **Files**: drop audio or video files onto the window, or click to browse (Ctrl+O).
+2. **Options**: pick the model and language. **Extras** (speaker names, on-screen
+   content, summary, translation) fold out when you need them.
+3. **Save to**: pick the format and folder. The transcript is always saved as a file,
+   next to the original by default (e.g. `interview_transcript.txt`), and existing
+   files are never overwritten. For a single file, **Rename…** sets the output name
+   for that run (the GUI's replacement for the old free-text output path; the CLI's
+   `--output` is unchanged).
+
+Then press **Start transcription** (Ctrl+Enter). If something is missing (ffmpeg, a
+graphics card, an API key), the window says so and offers **How to fix**. After
+`winget install` of ffmpeg, **Check again** finds it without a restart. API keys,
+subtitle timing and hardware options are under **Tools > Settings** (Ctrl+,).
+
 ### CLI
 
 ```bash
@@ -128,7 +144,7 @@ Scrivox/
 
 ## API Keys
 
-Add to `.env` file or enter in the GUI:
+Add to `.env` file or enter them in the GUI under **Tools > Settings > AI services**:
 
 | Key | Required For | Get One |
 |-----|-------------|---------|
@@ -152,7 +168,7 @@ Scrivox supports multiple API providers for vision, summary, and translation fea
 | **Ollama** (local) | Run Ollama locally, use `--api-base http://localhost:11434/v1/chat/completions` |
 | **Custom** | Any endpoint that accepts the OpenAI chat completions format |
 
-In the GUI, select your provider from the dropdown in the API Keys section.
+In the GUI, select your provider under **Tools > Settings > AI services**.
 
 ## CLI Reference
 
@@ -290,18 +306,22 @@ scrivox/
     formatter.py           Output formatting (6 formats)
     pipeline.py            Pipeline orchestrator (PipelineConfig -> run)
   ui/
-    app.py                 Main application window
+    app.py                 Main application window (three-step flow)
     theme.py               Dark theme configuration
-    widgets.py             Reusable widgets (autocomplete combobox)
+    widgets.py             Reusable widgets (drop zone, step cards, autocomplete combobox)
     log_redirect.py        Thread-safe stdout -> log widget
+    output_paths.py        Output naming, accepted files, plain-language errors (no Tk)
+    winnative.py           Windows niceties: DPI, dark title bar, taskbar flash, PATH refresh
     dialogs/
       track_dialog.py      Audio track selection dialog
+      settings_dialog.py   Tools > Settings (AI services, advanced)
+      help_dialog.py       "How to fix" help and the error report dialog
     frames/
       queue_frame.py       Job queue + multi-file browse + drag-and-drop
-      settings_frame.py    Model, language, feature toggles + sub-settings
+      settings_frame.py    Model, language, extras + their options
       models_frame.py      Advanced model and tuning settings
       api_frame.py         Provider selection + API key management
-      output_frame.py      Format + output path
+      output_frame.py      Format, save folder and output name
       progress_frame.py    Progress bar + elapsed timer
       log_frame.py         Scrollable log display (batched inserts)
       results_frame.py     Transcript display + copy/save
