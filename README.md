@@ -242,15 +242,28 @@ button to its recordings library - transcripts follow your Scrivox settings.
 # Install build dependencies
 pip install pyinstaller
 
-# Build both variants (Full requires HF_TOKEN env var)
+# Build all three variants: Lite, Regular and Full (Full requires HF_TOKEN env var)
 python build.py --clean
 
 # Build only Lite variant (no models needed)
 python build.py --lite
 
+# Build only Regular variant (all features, no bundled models)
+python build.py --regular
+
 # Build only Full variant (downloads diarization models)
 set HF_TOKEN=hf_your_token_here
 python build.py --full
+```
+
+## Tests
+
+```bash
+# Unit tests for output formatting and the LLM client (no GPU, network or API keys)
+python -m unittest discover -s tests
+
+# Environment check: CUDA, ffmpeg, audio devices, cached models
+python test_setup.py
 ```
 
 ## Project Structure
