@@ -272,6 +272,45 @@ set HF_TOKEN=hf_your_token_here
 python build.py --full
 ```
 
+## Building / Releases (GitLab CI)
+
+Releases are built by GitLab CI (`.gitlab-ci.yml`); the GitHub Actions
+workflow is no longer used. Pipelines run only for `v*` tags and when started
+by hand (web UI or API), never on ordinary pushes.
+
+| Stage | Job | Runner | What it does |
+|-------|-----|--------|--------------|
+| test | `test` | Linux (`python:3.11-bookworm`, Tk 8.6) | Unit and GUI tests under Xvfb with CPU-only torch. On release runs it also checks that `scrivox/__init__.py` has the release's version and that a `RELEASE_VERSION` run was started on that tag. |
+| build | `build-windows-lite`, `build-windows-regular`, `build-windows-full` | Windows laptop (PowerShell shell runner) | Python 3.11 + CUDA 12.6 torch, `build.py --clean --<variant>`, bundle checks, the portable `.7z` and the Inno Setup installer (`installer/windows.iss`). |
+| release | `release` | Linux | Creates or updates the GitLab Release for the tag, linking the uploaded files. |
+
+- **Windows toolchain:** `ci/tools-windows.ps1` installs Python 3.11.9 (NuGet
+  package plus Tcl/Tk from python.org's `tcltk.msi`), Inno Setup 6.7.3 and
+  7-Zip's `7zr.exe` once into `%ProgramData%\gitlab-runner-tools`, with every
+  download pinned by SHA-256. `ci/build-windows.ps1` does the build and
+  `ci/check_build.py` checks it: CUDA torch with its DLLs, `Scrivox.exe`,
+  `.env.example`, Tk, no bundled `nvcuda.dll`, no pyannote in Lite, and the
+  bundled models in Full.
+- **One variant per job:** the laptop runs one job at a time, so the three
+  variants build one after another. Each job may take up to 3 hours.
+- **Full needs `HF_TOKEN`:** the Full variant downloads the gated pyannote
+  diarization models, so its job only runs when an `HF_TOKEN` CI/CD variable
+  is available to the pipeline. If the variable is protected, the `v*` tags
+  must be protected too. Without `HF_TOKEN`, the pipeline builds Lite and
+  Regular, and the release notes say that Full was not built.
+- **Sizes:** each variant produces a `.7z` and a `-setup.exe` of roughly
+  0.2-2 GB each, because of the CUDA DLLs and, in Full, the bundled models.
+  That is far over GitLab's default 100 MB job-artifact limit, so the builds
+  are not job artifacts. On release runs, each Windows job uploads its files
+  straight to the project's Generic Package Registry (`Scrivox/<version>`;
+  the default limit is 5 GiB per file, which the job checks). The release
+  links to those files. An untagged manual run builds and checks everything
+  but keeps only the `SHA256SUMS-*.txt` files.
+
+To release: bump `scrivox/__init__.py` and add a `CHANGELOG.md` entry, then
+push the tag `vX.Y.Z`. To rebuild an existing tag, run a pipeline on the tag
+with `RELEASE_VERSION=vX.Y.Z`.
+
 ## Tests
 
 ```bash
