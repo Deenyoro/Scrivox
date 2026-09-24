@@ -303,13 +303,29 @@ by hand (web UI or API), never on ordinary pushes.
   That is far over GitLab's default 100 MB job-artifact limit, so the builds
   are not job artifacts. On release runs, each Windows job uploads its files
   straight to the project's Generic Package Registry (`Scrivox/<version>`;
-  the default limit is 5 GiB per file, which the job checks). The release
-  links to those files. An untagged manual run builds and checks everything
-  but keeps only the `SHA256SUMS-*.txt` files.
+  this GitLab instance sets no per-file limit there). The release links to
+  those files. An untagged manual run builds and checks everything but keeps
+  only the `SHA256SUMS-*.txt` files.
+- **2 GiB limit:** GitLab releases are copied to GitHub by the release
+  mirror, and GitHub rejects release assets of 2 GiB or more, so that is the
+  limit that counts. As in the old workflow, an installer at or over 2 GiB is
+  not published: the job warns, moves it to `out\oversize\` and leaves it
+  out of `SHA256SUMS-<variant>.txt`, and the variant ships only its `.7z`
+  portable. A `.7z` at or over 2 GiB fails the job. Full is the variant most
+  likely to get there.
 
-To release: bump `scrivox/__init__.py` and add a `CHANGELOG.md` entry, then
-push the tag `vX.Y.Z`. To rebuild an existing tag, run a pipeline on the tag
-with `RELEASE_VERSION=vX.Y.Z`.
+To release: bump `scrivox/__init__.py` and add a `CHANGELOG.md` entry for the
+version (the `test` job checks both), then push the tag `vX.Y.Z`.
+
+If a Windows job fails on a release run before it uploads anything, retry
+that job; the variants that already uploaded are not touched. To rebuild an existing tag from scratch,
+run a pipeline on the tag with `RELEASE_VERSION=vX.Y.Z`, but only while none
+of that version's files have been published. The builds are not
+reproducible, so the same file names would get new SHA-256 hashes, and the
+release mirror fails for a tag whose already-copied asset changes its hash.
+The Windows job therefore refuses to upload a file that is already in the
+package version. Once any of a version's files are published, release a new
+patch version instead.
 
 ## Tests
 
