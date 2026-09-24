@@ -1,0 +1,251 @@
+# GitLab CI for Scrivox.
+#
+# Builds the Windows release on the self-hosted GitLab runners:
+#   linux    -> Kubernetes executor on the cluster (unit + GUI tests, and the
+#               release job that creates the GitLab Release)
+#   windows  -> shell runner on the Windows laptop (PyInstaller onedir with
+#               CUDA 12.6 torch, portable .7z and Inno Setup installer for
+#               the Lite, Regular and Full variants)
+#
+# Runs on version tags and when started from the web UI / API (never on
+# plain pushes, so the laptop runner is not woken for every commit). Set
+# RELEASE_VERSION=v1.2.3 on a manual run (on the tag v1.2.3) to stamp that
+# version and publish the release for that existing tag, like the old
+# workflow_dispatch tag_name input. The Windows jobs bootstrap their own
+# toolchain (Python 3.11 + Tk, Inno Setup, 7-Zip) the first time under the
+# runner's tools directory, so nothing has to be pre-installed.
+#
+# Sizes: each variant is a 0.3-2 GB .7z plus a 0.3-2 GB installer (CUDA
+# DLLs; Full also bundles the pyannote models). That is far over GitLab's
+# default 100 MB job artifact limit, so the builds are NOT job artifacts:
+# on release runs each Windows job uploads its files straight to the
+# Generic Package Registry (default limit 5 GiB per file) and the release
+# job links them. Untagged web/API runs build and check everything but keep
+# only the checksums.
+#
+# The Full variant downloads the gated pyannote diarization models, so its
+# job only exists when an HF_TOKEN CI/CD variable is available to the
+# pipeline (as the GitHub workflow's HF_TOKEN secret was). Without it the
+# pipeline builds Lite and Regular and the release has no Full variant.
+#
+# The GitHub Actions workflow (.github/workflows/release.yml) is left as it
+# was; Actions is disabled on the GitHub mirror.
+
+stages: [test, build, release]
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "api"
+
+variables:
+  GIT_DEPTH: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_ROOT_USER_ACTION: ignore
+
+# ───────────────────────────── shared pieces ─────────────────────────────
+
+.version: &version
+  # v1.2.3 -> 1.2.3; untagged runs get a valid semver prerelease.
+  - |
+    if [ -n "$RELEASE_VERSION" ]; then VERSION="${RELEASE_VERSION#v}"; elif [ -n "$CI_COMMIT_TAG" ]; then VERSION="${CI_COMMIT_TAG#v}"; else VERSION="0.0.0-${CI_COMMIT_SHORT_SHA}"; fi
+    echo "App version: $VERSION"
+
+.version_ps: &version_ps
+  - |
+    if ($env:RELEASE_VERSION) { $env:VERSION = $env:RELEASE_VERSION -replace '^v','' } elseif ($env:CI_COMMIT_TAG) { $env:VERSION = $env:CI_COMMIT_TAG -replace '^v','' } else { $env:VERSION = "0.0.0-$env:CI_COMMIT_SHORT_SHA" }
+    Write-Host "App version: $env:VERSION"
+
+.linux:
+  tags: [linux]
+  interruptible: true
+
+.windows:
+  tags: [windows]
+  # Not interruptible: release runs upload GBs to the package registry
+  # from this job, and a cancel mid-upload would leave a partial release.
+  interruptible: false
+  variables:
+    GIT_STRATEGY: fetch
+  before_script:
+    - . .\ci\tools-windows.ps1
+    - *version_ps
+
+# ───────────────────────────── tests (gate) ─────────────────────────────
+
+# Python 3.11 like the Windows build, on Debian bookworm's Tk 8.6 (the Tk
+# the .exe ships; README: GUI tests must also pass on 8.6, not only Tk 9).
+# torch comes from the CPU index to keep the job small; the tests need no
+# GPU, network, ffmpeg or API keys. test_gui.py runs under Xvfb.
+test:
+  extends: .linux
+  stage: test
+  image: python:3.11-bookworm
+  variables:
+    DEBIAN_FRONTEND: noninteractive
+    PIP_CACHE_DIR: $CI_PROJECT_DIR/.cache/pip
+  cache:
+    key: pip-py311-bookworm
+    paths: [.cache/pip/]
+  script:
+    - *version
+    # A manual RELEASE_VERSION run must be started on that tag; refuse here,
+    # before the Windows laptop spends hours on the wrong ref (the Windows
+    # publish step and the release job re-check before publishing).
+    - |
+      if [ -n "$RELEASE_VERSION" ] && [ "$CI_COMMIT_TAG" != "v${RELEASE_VERSION#v}" ]; then
+        echo "RELEASE_VERSION=$RELEASE_VERSION but this pipeline runs on '${CI_COMMIT_TAG:-$CI_COMMIT_REF_NAME}'. Run it on the tag v${RELEASE_VERSION#v}."; exit 1
+      fi
+    # Release builds must carry the release's version inside the app too
+    # (window title, status bar and About read scrivox.__version__).
+    # Untagged 0.0.0-<sha> builds are not checked.
+    - |
+      case "$VERSION" in
+        0.0.0-*) echo "untagged build; skipping version check" ;;
+        *) APP_VERSION=$(python -c "import scrivox; print(scrivox.__version__)")
+           [ "$APP_VERSION" = "$VERSION" ] || { echo "scrivox.__version__ is $APP_VERSION but this release is $VERSION: bump scrivox/__init__.py first"; exit 1; } ;;
+      esac
+    - apt-get update -qq && apt-get install -y -qq xvfb xauth >/dev/null
+    - python -c "import tkinter, sys; print('Tk', tkinter.TkVersion); sys.exit(tkinter.TkVersion != 8.6)"
+    - pip install -q torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+    - pip install -q -r requirements.txt
+    # test_gui.py skips itself (and would pass silently) without a working
+    # display, torch or Pillow; make that a failure here instead.
+    - xvfb-run -a python -c "import tkinter, PIL, torch; tkinter.Tk().destroy(); print('display, torch', torch.__version__, 'and Pillow OK')"
+    - xvfb-run -a python -m unittest discover -s tests -v
+
+# ───────────────────────────── Windows ─────────────────────────────
+
+# One job per variant (the old workflow built all three in one 180-minute
+# job). The laptop runs one job at a time, so they queue one after another.
+.build-windows:
+  extends: .windows
+  stage: build
+  needs: [test]
+  timeout: 3h
+  script:
+    - .\ci\build-windows.ps1 -Variant $env:VARIANT
+    - |
+      if ($env:CI_COMMIT_TAG -match '^v' -or $env:RELEASE_VERSION) {
+        .\ci\publish-windows.ps1 -DistName $env:DIST_NAME
+      } else {
+        Write-Host "Not a release run: builds checked but not published (too large for job artifacts)."
+      }
+  artifacts:
+    name: scrivox-windows-$VARIANT-$CI_COMMIT_SHORT_SHA
+    paths:
+      - out/SHA256SUMS-*.txt
+      - out/links-*.ndjson
+    expire_in: 30 days
+
+build-windows-lite:
+  extends: .build-windows
+  variables:
+    VARIANT: Lite
+    DIST_NAME: Scrivox-Lite
+
+build-windows-regular:
+  extends: .build-windows
+  variables:
+    VARIANT: Regular
+    DIST_NAME: Scrivox
+
+build-windows-full:
+  extends: .build-windows
+  variables:
+    VARIANT: Full
+    DIST_NAME: Scrivox-Full
+  rules:
+    - if: $HF_TOKEN
+
+# ───────────────────────────── release ─────────────────────────────
+
+# Creates (or updates) the GitLab release for the version's tag with links
+# to the files the Windows jobs uploaded to the generic package registry.
+release:
+  extends: .linux
+  stage: release
+  image: alpine:3.20
+  needs:
+    - build-windows-lite
+    - build-windows-regular
+    - job: build-windows-full
+      optional: true
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+    - if: $RELEASE_VERSION
+  # Never auto-cancel a half-finished publish.
+  interruptible: false
+  variables:
+    GIT_STRATEGY: none
+  script:
+    - apk add --no-cache curl jq >/dev/null
+    - |
+      set -e
+      VERSION="${RELEASE_VERSION:-$CI_COMMIT_TAG}"; VERSION="${VERSION#v}"; TAG="v$VERSION"
+      API="$CI_API_V4_URL/projects/$CI_PROJECT_ID"; H="JOB-TOKEN: $CI_JOB_TOKEN"
+      TAG_JSON=$(curl -fsS -H "$H" "$API/repository/tags/$TAG") || { echo "Tag $TAG does not exist in this project"; exit 1; }
+      # A manual RELEASE_VERSION run must be started on the tag itself, or it
+      # would publish some other commit's builds under this tag.
+      TAG_SHA=$(printf '%s' "$TAG_JSON" | jq -r '.commit.id')
+      [ "$TAG_SHA" = "$CI_COMMIT_SHA" ] || { echo "Tag $TAG points at $TAG_SHA but this pipeline built $CI_COMMIT_SHA. Run the pipeline on the tag ref $TAG."; exit 1; }
+      ls -la out/ || true
+      cat out/links-*.ndjson > links.ndjson 2>/dev/null || true
+      test -s links.ndjson || { echo "No builds to publish"; exit 1; }
+      jq -r '.name' links.ndjson
+      ASSETS=$(jq -s -c . links.ndjson)
+      if [ -f out/links-Scrivox-Full.ndjson ]; then
+        FULL_ROW='| **Scrivox-Full** | ~1.5-2 GB | All features with pre-bundled diarization models. No HuggingFace token needed for diarization. |'
+      else
+        FULL_ROW='| Scrivox-Full | - | Not built for this release (the pipeline had no HF_TOKEN to download the diarization models). |'
+      fi
+      NOTES=$(cat <<EOF
+      ## Scrivox $TAG
+
+      GPU-accelerated transcription suite for Windows with NVIDIA CUDA. Transcribe audio/video, identify speakers with diarization, generate subtitles with speaker labels, analyze video keyframes, and summarize meetings.
+
+      **Output formats:** txt, md, srt, vtt, json, tsv
+      **Subtitles:** SRT and VTT with optional speaker labels (e.g. \`[Alice] Hello\` in SRT, \`<v Alice>\` voice tags in VTT)
+
+      ### Downloads
+
+      | Variant | Size | What's included |
+      |---------|------|-----------------|
+      | **Scrivox-Lite** | ~200-300 MB | Transcription only. No diarization, vision, or summary. |
+      | **Scrivox** (Regular) | ~500-800 MB | All features (diarization, vision, summary). Downloads diarization models on first run — requires HuggingFace token. |
+      $FULL_ROW
+
+      Each variant has a \`SHA256SUMS-Scrivox*.txt\` with the SHA-256 checksums of its two files.
+
+      ### Installation
+
+      **Installer (recommended):** download the \`-setup.exe\` for your variant and run it. It installs Scrivox, creates shortcuts, registers an uninstaller, and makes Scrivox auto-detectable by SimpleReliableRecorder.
+
+      **Portable:**
+      1. Download and extract the \`.7z\` archive
+      2. Copy \`.env.example\` to \`.env\` and add your API keys
+      3. Double-click \`Scrivox.exe\` for GUI, or use from command line
+
+      ### Requirements
+      - Windows 10/11 (64-bit)
+      - NVIDIA GPU with CUDA support
+
+      ### API Keys (add to .env or enter in GUI)
+      - **HF_TOKEN** — Required for diarization in Regular variant ([get one](https://huggingface.co/settings/tokens)). Not needed for Full (models bundled) or Lite (no diarization).
+      - **OPENROUTER_API_KEY** — Required for vision analysis and meeting summary ([get one](https://openrouter.ai/keys))
+
+      Built on GitLab CI.
+      EOF
+      )
+      BODY=$(jq -cn --arg tag "$TAG" --arg name "Scrivox $TAG" --arg desc "$NOTES" --argjson links "$ASSETS" '{tag_name:$tag, name:$name, description:$desc, assets:{links:$links}}')
+      if curl -fsS -o /dev/null -H "$H" "$API/releases/$TAG" 2>/dev/null; then
+        curl -fsS -H "$H" "$API/releases/$TAG/assets/links" | jq -r '.[].id' | while read -r id; do
+          curl -fsS -X DELETE -H "$H" "$API/releases/$TAG/assets/links/$id" >/dev/null
+        done
+        curl -fsS -X PUT -H "$H" -H "Content-Type: application/json" "$API/releases/$TAG" -d "$BODY" | jq -r '"updated release " + .tag_name'
+        while read -r l; do curl -fsS -X POST -H "$H" -H "Content-Type: application/json" "$API/releases/$TAG/assets/links" -d "$l" >/dev/null; done < links.ndjson
+      else
+        curl -fsS -X POST -H "$H" -H "Content-Type: application/json" "$API/releases" -d "$BODY" | jq -r '"created release " + .tag_name'
+      fi
+      echo "Published $TAG with:"; jq -r '.name' links.ndjson | sed 's/^/  /'
