@@ -4,6 +4,44 @@ All notable changes to Scrivox are listed here. Versions match the git tags
 (`vX.Y.Z`) and `scrivox.__version__`, which the window title, status bar and
 About dialog show.
 
+## [1.8.3] - 2026-09-24
+
+Build and release changes only; the app itself is unchanged.
+
+### Added
+- GitLab CI pipeline (`.gitlab-ci.yml`) that replaces the GitHub Actions
+  release workflow. It runs on `v*` tags and on manual web/API runs, never on
+  plain pushes.
+  - **test** (Linux, Python 3.11, Tk 8.6): unit and GUI tests under Xvfb with
+    CPU-only torch. For a release it also checks that `scrivox.__version__`
+    matches the tag, that this file has an entry for the version, and that a
+    `RELEASE_VERSION` run was started on that tag.
+  - **build-windows-lite / -regular / -full** (Windows runner): Python 3.11.9
+    + Tk, Inno Setup 6.7.3 and 7-Zip from pinned, SHA-256-checked downloads
+    (`ci/tools-windows.ps1`); CUDA 12.6 torch, `build.py --clean --<variant>`,
+    bundle checks (`ci/check_build.py`), the portable `.7z` and the installer
+    (`ci/build-windows.ps1`). On release runs each job uploads its files to
+    the GitLab Package Registry (`ci/publish-windows.ps1`).
+  - **release**: creates or updates the GitLab release with links to those
+    files.
+- README: "Building / Releases (GitLab CI)" section.
+
+### Changed
+- Releases are built and published on GitLab only (GitHub Actions is
+  disabled).
+- An installer of 2 GiB or more (over GitHub's release asset limit, which
+  applies because releases are mirrored to GitHub) is still left out of the
+  release, as before; that variant ships its `.7z` portable only.
+- Publishing never uploads a file whose name is already in that version's
+  package (builds are not reproducible, so the copy would differ). To
+  republish, release a new patch version; the README explains this.
+
+### Notes
+- Scrivox-Full is built only once an `HF_TOKEN` CI/CD variable is added to
+  the GitLab project (it downloads the gated pyannote models). If that
+  variable is protected, the `v*` tags must be protected too. Until then a
+  release has Lite and Regular only, and its notes say Full was not built.
+
 ## [1.8.2] - 2026-09-24
 
 Everything below changed since v1.8.1. Note: v1.8.1 was tagged while
