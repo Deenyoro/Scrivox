@@ -4,6 +4,11 @@ All notable changes to Scrivox are listed here. Versions match the git tags
 (`vX.Y.Z`) and `scrivox.__version__`, which the window title, status bar and
 About dialog show.
 
+## [1.8.4] - 2026-09-25
+
+### Changed
+- CI: pipelines run on merge requests (tests/Linux builds; Windows/macOS manual; nothing published).
+
 ## [1.8.3] - 2026-09-24
 
 Build and release changes only; the app itself is unchanged.
